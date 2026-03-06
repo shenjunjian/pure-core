@@ -534,6 +534,7 @@ let isOptimized = false
 /**
  * Optimize property lookup for cache properties on Element and Text nodes
  */
+// #createVaporApp-21
 export function optimizePropertyLookup(): void {
   if (isOptimized) return
   isOptimized = true

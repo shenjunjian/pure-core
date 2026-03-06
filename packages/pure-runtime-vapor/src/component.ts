@@ -949,6 +949,7 @@ export function unmountComponent(
   }
 }
 
+// #createVaporApp-19
 export function getExposed(
   instance: GenericComponentInstance,
 ): Record<string, any> | undefined {

@@ -357,6 +357,7 @@ export type AppUnmountFn = (app: App) => void
 /**
  * @internal
  */
+// #createVaporApp-20
 export function createAppAPI<HostElement, Comp = Component>(
   // render: RootRenderFunction<HostElement>,
   // hydrate?: RootHydrateFunction,

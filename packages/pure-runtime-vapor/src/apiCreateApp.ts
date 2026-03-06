@@ -25,7 +25,9 @@ import { setIsHydratingEnabled, withHydration } from './dom/hydration'
 
 let _createApp: CreateAppFunction<ParentNode, VaporComponent>
 
+// #createVaporApp-10
 const mountApp: AppMountFn<ParentNode> = (app, container) => {
+  // #createVaporApp-11
   optimizePropertyLookup()
 
   // clear content before mounting
@@ -38,6 +40,7 @@ const mountApp: AppMountFn<ParentNode> = (app, container) => {
 
   const instance =
     (app._ceComponent as VaporComponentInstance) ||
+    // #createVaporApp-12
     createComponent(
       app._component,
       app._props as RawProps,
@@ -46,7 +49,9 @@ const mountApp: AppMountFn<ParentNode> = (app, container) => {
       false,
       app._context,
     )
+  // #createVaporApp-13
   mountComponent(instance, container)
+  // #createVaporApp-14
   flushOnAppMount()
 
   return instance!
@@ -76,27 +81,35 @@ const hydrateApp: AppMountFn<ParentNode> = (app, container) => {
   return instance!
 }
 
+// #createVaporApp-15
 const unmountApp: AppUnmountFn = app => {
+  // #createVaporApp-16
   unmountComponent(app._instance as VaporComponentInstance, app._container)
 }
 
+// #createVaporApp-6
 function prepareApp() {
   // compile-time feature flags check
   if (__ESM_BUNDLER__ && !__TEST__) {
+    // #createVaporApp-7
     initFeatureFlags()
   }
 
+  // #createVaporApp-8
   const target = getGlobalThis()
   target.__VUE__ = true
   if (__DEV__ || __FEATURE_PROD_DEVTOOLS__) {
+    // #createVaporApp-9
     setDevtoolsHook(target.__VUE_DEVTOOLS_GLOBAL_HOOK__, target)
   }
 }
 
+// #createVaporApp-17
 function postPrepareApp(app: App) {
   app.vapor = true
   const mount = app.mount
   app.mount = (container, ...args: any[]) => {
+    // #createVaporApp-18
     container = normalizeContainer(container) as ParentNode
     const proxy = mount(container, ...args)
     if (container instanceof Element) {
@@ -107,13 +120,18 @@ function postPrepareApp(app: App) {
   }
 }
 
+// #createVaporApp-1
 export const createVaporApp: CreateAppFunction<ParentNode, VaporComponent> = (
   comp,
   props,
 ) => {
+  // #createVaporApp-2
   prepareApp()
+  // #createVaporApp-3
   if (!_createApp) _createApp = createAppAPI(mountApp, unmountApp, getExposed)
+  // #createVaporApp-4
   const app = _createApp(comp, props)
+  // #createVaporApp-5
   postPrepareApp(app)
   return app
 }
