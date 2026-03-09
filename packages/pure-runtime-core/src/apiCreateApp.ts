@@ -46,7 +46,7 @@ export interface App<HostElement = any> {
   ): this
   use<Options>(plugin: Plugin<Options>, options: NoInfer<Options>): this
 
-  mixin(mixin: ComponentOptions): this
+  // mixin(mixin: ComponentOptions): this
   component(name: string): Component | undefined
   component<T extends Component | DefineComponent>(
     name: string,
@@ -357,25 +357,26 @@ export type AppUnmountFn = (app: App) => void
 /**
  * @internal
  */
-// #createVaporApp-20
 export function createAppAPI<HostElement, Comp = Component>(
   // render: RootRenderFunction<HostElement>,
   // hydrate?: RootHydrateFunction,
   mount: AppMountFn<HostElement>,
   unmount: AppUnmountFn,
   getPublicInstance: (instance: GenericComponentInstance) => any,
-  render?: RootRenderFunction,
+  // render?: RootRenderFunction,   // CUTDOWN 非vapor模式才有该参
 ): CreateAppFunction<HostElement, Comp> {
   return function createApp(rootComponent, rootProps = null) {
-    if (!isFunction(rootComponent)) {
-      rootComponent = extend({}, rootComponent)
-    }
+    // CUTDOWN vapor 不支持 `纯函数` 做为组件, 可以使用 defineVaporComponent(fn, extraOptions) 包装一下
+    // if (!isFunction(rootComponent)) {
+    //   rootComponent = extend({}, rootComponent)
+    // }
 
     if (rootProps != null && !isObject(rootProps)) {
       __DEV__ && warn(`root props passed to app.mount() must be an object.`)
       rootProps = null
     }
 
+    // SLIM vapor模式下，需要瘦身
     const context = createAppContext()
     const installedPlugins = new WeakSet()
     const pluginCleanupFns: Array<() => any> = []
@@ -421,22 +422,22 @@ export function createAppAPI<HostElement, Comp = Component>(
         }
         return app
       },
-
-      mixin(mixin: ComponentOptions) {
-        if (__FEATURE_OPTIONS_API__) {
-          if (!context.mixins.includes(mixin)) {
-            context.mixins.push(mixin)
-          } else if (__DEV__) {
-            warn(
-              'Mixin has already been applied to target app' +
-                (mixin.name ? `: ${mixin.name}` : ''),
-            )
-          }
-        } else if (__DEV__) {
-          warn('Mixins are only available in builds supporting Options API')
-        }
-        return app
-      },
+      // CUTDOWN vapor 不支持 mixin
+      // mixin(mixin: ComponentOptions) {
+      //   if (__FEATURE_OPTIONS_API__) {
+      //     if (!context.mixins.includes(mixin)) {
+      //       context.mixins.push(mixin)
+      //     } else if (__DEV__) {
+      //       warn(
+      //         'Mixin has already been applied to target app' +
+      //         (mixin.name ? `: ${mixin.name}` : ''),
+      //       )
+      //     }
+      //   } else if (__DEV__) {
+      //     warn('Mixins are only available in builds supporting Options API')
+      //   }
+      //   return app
+      // },
 
       component(name: string, component?: Component): any {
         if (__DEV__) {
@@ -469,8 +470,9 @@ export function createAppAPI<HostElement, Comp = Component>(
 
       mount(
         rootContainer: HostElement & { __vue_app__?: App },
-        isHydrate?: boolean,
-        namespace?: boolean | ElementNamespace,
+        // CUTDOWN 传统mount 才有
+        // isHydrate?: boolean,
+        // namespace?: boolean | ElementNamespace,
       ): any {
         if (!isMounted) {
           // #5571
@@ -481,7 +483,13 @@ export function createAppAPI<HostElement, Comp = Component>(
                 ` you need to unmount the previous app by calling \`app.unmount()\` first.`,
             )
           }
-          const instance = mount(app, rootContainer, isHydrate, namespace)
+          // SLIM vapor模式下，instance 也需要瘦身
+          const instance = mount(
+            app,
+            rootContainer,
+            // CUTDOWN 传统mount 才有
+            // , isHydrate, namespace
+          )
 
           if (__DEV__ || __FEATURE_PROD_DEVTOOLS__) {
             app._instance = instance
@@ -493,6 +501,7 @@ export function createAppAPI<HostElement, Comp = Component>(
           // for devtools and telemetry
           rootContainer.__vue_app__ = app
 
+          // mounted  返回实例的 expose部分
           return getPublicInstance(instance)
         } else if (__DEV__) {
           warn(
@@ -563,15 +572,15 @@ export function createAppAPI<HostElement, Comp = Component>(
         }
       },
     })
-
-    if (__COMPAT__) {
-      installAppCompatProperties(
-        app,
-        context,
-        // vapor doesn't have compat mode so this is always passed
-        render!,
-      )
-    }
+    // CUTDOWN 不要兼容模式
+    // if (__COMPAT__) {
+    //   installAppCompatProperties(
+    //     app,
+    //     context,
+    //     //  vapor doesn't have compat mode so this is always passed
+    //     // render!
+    //   )
+    // }
 
     return app
   }

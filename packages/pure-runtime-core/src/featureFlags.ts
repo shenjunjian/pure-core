@@ -3,6 +3,7 @@ import { getGlobalThis } from '@vue/shared'
 let initialized = false
 
 /**
+ *  #createVaporApp-7.1
  * This is only called in esm-bundler builds.
  * It is called when a renderer is created, in `baseCreateRenderer` so that
  * importing runtime-core is side-effects free.
@@ -12,10 +13,11 @@ export function initFeatureFlags(): void {
 
   const needWarn = []
 
-  if (typeof __FEATURE_OPTIONS_API__ !== 'boolean') {
-    __DEV__ && needWarn.push(`__VUE_OPTIONS_API__`)
-    getGlobalThis().__VUE_OPTIONS_API__ = true
-  }
+  // CUTDOWN vapor 不支持option api
+  // if (typeof __FEATURE_OPTIONS_API__ !== 'boolean') {
+  //   __DEV__ && needWarn.push(`__VUE_OPTIONS_API__`)
+  //   getGlobalThis().__VUE_OPTIONS_API__ = true
+  // }
 
   if (typeof __FEATURE_PROD_DEVTOOLS__ !== 'boolean') {
     __DEV__ && needWarn.push(`__VUE_PROD_DEVTOOLS__`)

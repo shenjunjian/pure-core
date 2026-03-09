@@ -48,7 +48,7 @@ function emit(event: string, ...args: any[]) {
     buffer.push({ event, args })
   }
 }
-
+// #createVaporApp-9.1 开启 vue devtools 功能
 export function setDevtoolsHook(hook: DevtoolsHook, target: any): void {
   devtools = hook
   if (devtools) {
