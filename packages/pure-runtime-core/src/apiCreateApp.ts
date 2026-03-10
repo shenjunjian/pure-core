@@ -17,19 +17,13 @@ import type {
   ComponentPublicInstance,
 } from './componentPublicInstance'
 import { type Directive, validateDirectiveName } from './directives'
-import type {
-  ElementNamespace,
-  MoveType,
-  RootRenderFunction,
-  UnmountComponentFn,
-} from './renderer'
+import type { ElementNamespace, MoveType, UnmountComponentFn } from './renderer'
 import type { InjectionKey } from './apiInject'
 import { warn } from './warning'
 import type { VNode } from './vnode'
 import { devtoolsInitApp, devtoolsUnmountApp } from './devtools'
-import { NO, extend, hasOwn, isFunction, isObject } from '@vue/shared'
+import { NO, hasOwn, isFunction, isObject } from '@vue/shared'
 import { type SuspenseBoundary, type TransitionHooks, version } from '.'
-import { installAppCompatProperties } from './compat/global'
 import type { NormalizedPropsOptions } from './componentProps'
 import type { ObjectEmitsOptions } from './componentEmits'
 import { ErrorCodes, callWithAsyncErrorHandling } from './errorHandling'
@@ -317,24 +311,25 @@ export type Plugin<
 > = FunctionPlugin<P> | ObjectPlugin<P>
 
 export function createAppContext(): AppContext {
+  // CUTDOWN 先屏蔽掉， 后面用到哪个再放开哪个
   return {
     app: null as any,
     config: {
       isNativeTag: NO,
-      performance: false,
-      globalProperties: {},
-      optionMergeStrategies: {},
-      errorHandler: undefined,
-      warnHandler: undefined,
-      compilerOptions: {},
+      // performance: false,
+      // globalProperties: {},
+      // optionMergeStrategies: {},
+      // errorHandler: undefined,
+      // warnHandler: undefined,
+      // compilerOptions: {},
     },
-    mixins: [],
+    // mixins: [],
     components: {},
     directives: {},
     provides: Object.create(null),
-    optionsCache: new WeakMap(),
-    propsCache: new WeakMap(),
-    emitsCache: new WeakMap(),
+    // optionsCache: new WeakMap(),
+    // propsCache: new WeakMap(),
+    // emitsCache: new WeakMap(),
   }
 }
 
@@ -572,15 +567,6 @@ export function createAppAPI<HostElement, Comp = Component>(
         }
       },
     })
-    // CUTDOWN 不要兼容模式
-    // if (__COMPAT__) {
-    //   installAppCompatProperties(
-    //     app,
-    //     context,
-    //     //  vapor doesn't have compat mode so this is always passed
-    //     // render!
-    //   )
-    // }
 
     return app
   }

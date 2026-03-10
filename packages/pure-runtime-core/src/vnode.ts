@@ -250,10 +250,7 @@ export interface VNode<
    * @internal index for cleaning v-memo cache
    */
   cacheIndex?: number
-  /**
-   * @internal __COMPAT__ only
-   */
-  isCompatRoot?: true
+
   /**
    * @internal custom element interception hook
    */
@@ -549,11 +546,6 @@ function createBaseVNode(
     currentBlock.push(vnode)
   }
 
-  if (__COMPAT__) {
-    convertLegacyVModelProps(vnode)
-    defineLegacyVNodeProperties(vnode)
-  }
-
   return vnode
 }
 
@@ -600,11 +592,6 @@ function _createVNode(
   // class component normalization.
   if (isClassComponent(type)) {
     type = type.__vccOpts
-  }
-
-  // 2.x async/functional component compat
-  if (__COMPAT__) {
-    type = convertLegacyComponent(type, currentRenderingInstance)
   }
 
   // class & style normalization.
@@ -747,10 +734,6 @@ export function cloneVNode<T, U>(
       cloned as VNode,
       transition.clone(cloned as VNode) as TransitionHooks,
     )
-  }
-
-  if (__COMPAT__) {
-    defineLegacyVNodeProperties(cloned as VNode)
   }
 
   return cloned
