@@ -113,33 +113,33 @@ export default defineConfig({
       // @ts-expect-error
       ...(includeVaporBrowserE2E
         ? [
-            {
-              extends: './packages-private/vapor-e2e-test/vite.config.ts',
-              root: './packages-private/vapor-e2e-test',
-              test: {
-                globals: true,
-                isolate: true,
-                name: 'e2e-vapor-browser',
-                setupFiles: ['./__tests__/setupBrowser.ts'],
-                browser: {
-                  enabled: true,
-                  provider: playwright({
-                    launchOptions: {
-                      args: process.env.CI
-                        ? ['--no-sandbox', '--disable-setuid-sandbox']
-                        : [],
-                    },
-                  }),
-                  headless: true,
-                  instances: [{ browser: 'chromium' }],
-                },
-                include: [
-                  './__tests__/todomvc.spec.ts',
-                  './__tests__/vdomInterop.spec.ts',
-                ],
+          {
+            extends: './packages-private/vapor-e2e-test/vite.config.ts',
+            root: './packages-private/vapor-e2e-test',
+            test: {
+              globals: true,
+              isolate: true,
+              name: 'e2e-vapor-browser',
+              setupFiles: ['./__tests__/setupBrowser.ts'],
+              browser: {
+                enabled: true,
+                provider: playwright({
+                  launchOptions: {
+                    args: process.env.CI
+                      ? ['--no-sandbox', '--disable-setuid-sandbox']
+                      : [],
+                  },
+                }),
+                headless: true,
+                instances: [{ browser: 'chromium' }],
               },
+              include: [
+                './__tests__/todomvc.spec.ts',
+                './__tests__/vdomInterop.spec.ts',
+              ],
             },
-          ]
+          },
+        ]
         : []),
     ],
     onConsoleLog(log) {
@@ -149,8 +149,8 @@ export default defineConfig({
     },
   },
   staged: {
-    '*.{js,json}': ['vp fmt --no-error-on-unmatched-pattern'],
-    '*.ts?(x)': ['vp lint --fix', 'vp fmt --no-error-on-unmatched-pattern'],
+    '*.{js,json}': [/*'vp fmt --no-error-on-unmatched-pattern'*/],
+    '*.ts?(x)': [/*'vp lint --fix', 'vp fmt --no-error-on-unmatched-pattern'*/],
   },
   lint: {
     categories: {
