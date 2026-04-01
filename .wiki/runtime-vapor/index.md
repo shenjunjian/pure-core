@@ -5,16 +5,19 @@
 ## 一、公共 API
 
 ### 应用创建
+
 - `createVaporApp` - 创建 Vapor 应用实例
 - `createVaporSSRApp` - 创建 Vapor SSR 应用实例
 
 ### 组件定义
+
 - `defineVaporComponent` - 定义 Vapor 组件
 - `defineVaporAsyncComponent` - 定义 Vapor 异步组件
 - `defineVaporCustomElement` - 定义 Vapor 自定义元素
 - `defineVaporSSRCustomElement` - 定义 Vapor SSR 自定义元素
 
 ### 类型
+
 - `DefineVaporComponent` - Vapor 组件定义类型
 - `VaporPublicProps` - Vapor 公共属性类型
 - `VaporRenderResult` - Vapor 渲染结果类型
@@ -23,17 +26,20 @@
 - `VaporDirective` - Vapor 指令类型
 
 ### 内置组件
+
 - `VaporTeleport` - Vapor 传送门组件
 - `VaporKeepAlive` - Vapor 保持活跃组件
 - `VaporTransition` - Vapor 过渡组件
 - `VaporTransitionGroup` - Vapor 过渡组组件
 
 ### 插件
+
 - `vaporInteropPlugin` - Vapor 与 VDOM 互操作插件
 
 ## 二、编译器使用的 API
 
 ### 块操作
+
 - `insert` - 插入节点
 - `prepend` - 前置插入节点
 - `remove` - 移除节点
@@ -41,6 +47,7 @@
 - `Block` - 块类型
 
 ### 组件操作
+
 - `createComponent` - 创建组件
 - `createComponentWithFallback` - 创建带回退的组件
 - `createPlainElement` - 创建普通元素
@@ -49,6 +56,7 @@
 - `VaporComponentInstance` - Vapor 组件实例类型
 
 ### 渲染
+
 - `renderEffect` - 渲染效果
 - `createIf` - 创建条件渲染
 - `createKeyedFragment` - 创建键控片段
@@ -59,6 +67,7 @@
 - `createDynamicComponent` - 创建动态组件
 
 ### 节点操作
+
 - `createTextNode` - 创建文本节点
 - `child` - 获取子节点
 - `nthChild` - 获取第 n 个子节点
@@ -66,6 +75,7 @@
 - `txt` - 文本操作
 
 ### 属性操作
+
 - `setText` - 设置文本
 - `setBlockText` - 设置块文本
 - `setHtml` - 设置 HTML
@@ -80,6 +90,7 @@
 - `setElementText` - 设置元素文本
 
 ### 事件操作
+
 - `on` - 绑定事件
 - `delegate` - 事件委托
 - `delegateEvents` - 委托事件
@@ -87,19 +98,24 @@
 - `createInvoker` - 创建事件调用器
 
 ### 插槽操作
+
 - `createSlot` - 创建插槽
 - `withVaporCtx` - 使用 Vapor 上下文
 
 ### 模板操作
+
 - `template` - 模板操作
 
 ### 模板引用
+
 - `createTemplateRefSetter` - 创建模板引用设置器
 
 ### CSS 变量
+
 - `useVaporCssVars` - 使用 Vapor CSS 变量
 
 ### 指令
+
 - `applyVShow` - 应用 v-show 指令
 - `applyTextModel` - 应用文本模型
 - `applyRadioModel` - 应用单选框模型
@@ -109,6 +125,7 @@
 - `withVaporDirectives` - 使用 Vapor 指令
 
 ### 片段
+
 - `isFragment` - 检查是否为片段
 - `VaporFragment` - Vapor 片段
 - `DynamicFragment` - 动态片段
@@ -116,16 +133,20 @@
 ## 三、类型定义
 
 ### 组件类型
+
 - `VaporComponent` - Vapor 组件类型
 - `VaporComponentOptions` - Vapor 组件选项类型
 
 ### 插槽类型
+
 - `VaporSlot` - Vapor 插槽类型
 
 ### 过渡类型
+
 - `VaporTransitionHooks` - Vapor 过渡钩子类型
 
 ### 上下文类型
+
 - `VaporKeepAliveContext` - Vapor KeepAlive 上下文类型
 
 ## 总结

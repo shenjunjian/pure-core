@@ -17,7 +17,7 @@ nr build vue -f esm-bundler+esm-browser  # 指定多个格式
 
 - `-f, --formats`: 指定构建格式（如 `cjs`, `esm-bundler`, `global` 等）
 - `-d, --devOnly`: 只构建开发版本
-- `-p, --prodOnly`: 只构建生产版本  
+- `-p, --prodOnly`: 只构建生产版本
 - `-t, --withTypes`: 同时构建 TypeScript 类型定义
 - `-s, --sourceMap`: 生成 source map
 - `--release`: 发布构建模式
@@ -32,33 +32,36 @@ nr build vue -f esm-bundler+esm-browser  # 指定多个格式
    - 过滤条件：必须包含 `package.json` 且不是私有包（除非有 `buildOptions`）
 
 2. **目标包选择方式**：
+
    ```javascript
    // utils.js 中的 targets 数组包含了所有可构建的包
-   const targets = fs.readdirSync(packagesPath).filter(f => {
-     // 过滤逻辑...
-   }).concat('template-explorer')
+   const targets = fs
+     .readdirSync(packagesPath)
+     .filter(f => {
+       // 过滤逻辑...
+     })
+     .concat('template-explorer')
    ```
 
 3. **模糊匹配**：
    ```javascript
    // 支持部分匹配，如 "dom" 会匹配 "compiler-dom", "runtime-dom" 等
-   fuzzyMatchTarget(['dom'], false)  // 返回第一个匹配项
-   fuzzyMatchTarget(['dom'], true)   // 返回所有匹配项
+   fuzzyMatchTarget(['dom'], false) // 返回第一个匹配项
+   fuzzyMatchTarget(['dom'], true) // 返回所有匹配项
    ```
 
 ### 三、构建产物格式
 
 支持 8 种构建格式（在 `create-rolldown-config.js` 中定义）：
 
-1. **`esm-bundler`**: ES Module 格式，供打包工具使用     【index-with-vapor.ts】
-2. **`esm-browser`**: 浏览器原生 ES Module 格式          【index.ts】
-3. **`cjs`**: CommonJS 格式                             【index.ts】
-4. **`global`**: IIFE 格式，可通过全局变量访问            【index.ts】
-5. **`esm-bundler-runtime`**: 运行时专用的 ES Module      (runtime-with-vapor.ts)
-6. **`esm-browser-runtime`**: 浏览器运行时专用 ES Module  【runtime.ts】
-7. **`global-runtime`**: 运行时专用的全局格式             【runtime.ts】
-8. **`esm-browser-vapor`**: Vapor 模式的浏览器 ES Module  (runtime-with-vapor.ts)
-
+1. **`esm-bundler`**: ES Module 格式，供打包工具使用 【index-with-vapor.ts】
+2. **`esm-browser`**: 浏览器原生 ES Module 格式 【index.ts】
+3. **`cjs`**: CommonJS 格式 【index.ts】
+4. **`global`**: IIFE 格式，可通过全局变量访问 【index.ts】
+5. **`esm-bundler-runtime`**: 运行时专用的 ES Module (runtime-with-vapor.ts)
+6. **`esm-browser-runtime`**: 浏览器运行时专用 ES Module 【runtime.ts】
+7. **`global-runtime`**: 运行时专用的全局格式 【runtime.ts】
+8. **`esm-browser-vapor`**: Vapor 模式的浏览器 ES Module (runtime-with-vapor.ts)
 
 ### 四、每个包的入口配置
 
@@ -67,14 +70,14 @@ nr build vue -f esm-bundler+esm-browser  # 指定多个格式
 在 `create-rolldown-config.js` 的 `createConfig` 函数中：
 
 ```javascript
-let entryFile = 'index.ts'  // 默认入口
+let entryFile = 'index.ts' // 默认入口
 
 // 特殊处理 vue 包的不同格式
 if (pkg.name === 'vue') {
   if (format === 'esm-browser-vapor' || format === 'esm-bundler-runtime') {
     entryFile = 'runtime-with-vapor.ts'
   } else if (format === 'esm-bundler') {
-    entryFile = 'index-with-vapor.ts'  
+    entryFile = 'index-with-vapor.ts'
   } else if (format.includes('runtime')) {
     entryFile = 'runtime.ts'
   }
@@ -85,21 +88,24 @@ if (isCompatPackage && (isBrowserESMBuild || isBundlerESMBuild)) {
   entryFile = `esm-${entryFile}`
 }
 
-entryFile = 'src/' + entryFile  // 最终路径
+entryFile = 'src/' + entryFile // 最终路径
 ```
 
 #### 2. 实际入口文件示例
 
 **Vue 主包 (`packages/vue`)：**
+
 - `src/index.ts`: 完整构建（包含编译器）
 - `src/runtime.ts`: 运行时构建（不包含编译器）
 - `src/runtime-with-vapor.ts`: 运行时 + Vapor 模式
 - `src/index-with-vapor.ts`: 完整 + Vapor 模式
 
 **Runtime Core (`packages/runtime-core`)：**
+
 - `src/index.ts`: 导出核心 API
 
 **Shared 工具包 (`packages/shared`)：**
+
 - `src/index.ts`: 导出共享工具函数
 
 #### 3. 包级别的格式配置
@@ -112,7 +118,7 @@ entryFile = 'src/' + entryFile  // 最终路径
     "name": "Vue",
     "formats": [
       "esm-bundler",
-      "esm-bundler-runtime", 
+      "esm-bundler-runtime",
       "cjs",
       "global",
       "global-runtime",
@@ -136,8 +142,7 @@ entryFile = 'src/' + entryFile  // 最终路径
 
 这套构建系统设计得非常灵活，既支持单个包的精确构建，也支持批量构建，还能根据不同用途生成不同格式的产物。
 
-
-# 2. 在构建时，如何替换 __DEV__  __ESM_BUNDLER__ 这些预定义的变量的？
+# 2. 在构建时，如何替换 **DEV** **ESM_BUNDLER** 这些预定义的变量的？
 
 我来详细分析 build 脚本中是如何替换这些预定义变量的。
 
@@ -164,7 +169,7 @@ transform: {
 
 ```javascript
 plugins: [
-  ...resolveReplace(),  // 补充的字符串替换插件
+  ...resolveReplace(), // 补充的字符串替换插件
   // 其他插件...
 ]
 ```
@@ -185,14 +190,14 @@ function resolveDefine() {
     __CJS__: String(isCJSBuild),
     __SSR__: String(isCJSBuild || isBundlerESMBuild || isServerRenderer),
     __COMPAT__: String(isCompatBuild),
-    
+
     // 功能标志
     __FEATURE_SUSPENSE__: `true`,
     __FEATURE_OPTIONS_API__: isBundlerESMBuild
-      ? `__VUE_OPTIONS_API__`  // 保留给打包工具处理
+      ? `__VUE_OPTIONS_API__` // 保留给打包工具处理
       : `true`,
     __FEATURE_PROD_DEVTOOLS__: isBundlerESMBuild
-      ? `__VUE_PROD_DEVTOOLS__`  // 保留给打包工具处理
+      ? `__VUE_PROD_DEVTOOLS__` // 保留给打包工具处理
       : `false`,
     __FEATURE_PROD_HYDRATION_MISMATCH_DETAILS__: isBundlerESMBuild
       ? `__VUE_PROD_HYDRATION_MISMATCH_DETAILS__`
@@ -248,6 +253,7 @@ __RUNTIME_COMPILE__=true pnpm build runtime-core
 假设构建 `vue` 包的 `global` 格式（生产环境）：
 
 **源代码：**
+
 ```typescript
 // packages/vue/src/runtime.ts
 if (__DEV__) {
@@ -260,13 +266,16 @@ if (__ESM_BUNDLER__) {
 ```
 
 **构建后结果：**
+
 ```javascript
 // dist/vue.runtime.global.prod.js
-if (false) {  // __DEV__ 被替换为 false
+if (false) {
+  // __DEV__ 被替换为 false
   initDev()
 }
 
-if (false) {  // __ESM_BUNDLER__ 被替换为 false
+if (false) {
+  // __ESM_BUNDLER__ 被替换为 false
   // bundler 特定逻辑（这段代码会被 tree-shaking 移除）
 }
 ```
@@ -276,6 +285,7 @@ if (false) {  // __ESM_BUNDLER__ 被替换为 false
 从 `global.d.ts` 和构建脚本中可以看到支持的变量包括：
 
 **环境标识：**
+
 - `__DEV__`: 开发模式
 - `__TEST__`: 测试环境
 - `__E2E_TEST__`: 端到端测试
@@ -287,6 +297,7 @@ if (false) {  // __ESM_BUNDLER__ 被替换为 false
 - `__SSR__`: 服务端渲染
 
 **版本和特性：**
+
 - `__VERSION__`: 版本号
 - `__COMPAT__`: 兼容模式
 - `__FEATURE_*`: 各种功能标志

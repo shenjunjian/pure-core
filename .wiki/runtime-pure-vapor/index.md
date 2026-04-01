@@ -12,14 +12,16 @@
 ## 一、需要实现的函数（按开发顺序）
 
 ### 1. 基础 DOM 操作 node.ts
-- [x] `createTextNode` - 创建文本节点 
-- [x] `createComment` - 创建注释节点 
+
+- [x] `createTextNode` - 创建文本节点
+- [x] `createComment` - 创建注释节点
 - [x] `txt` - 获取文本
 - [x] `child` - 获取子节点
 - [x] `nthChild` - 获取第 n 个子节点
 - [x] `next` - 获取下一个节点
 
 ### 2. 块操作 block.ts
+
 - [x] `Block` - 块类型定义
 - [x] `setInsertionState` - 设置插入状态
 - [x] `insert` - 插入节点
@@ -27,6 +29,7 @@
 - [x] `remove` - 移除节点
 
 ### 3. 属性操作 prop.ts
+
 - [x] `setText` - 设置文本
 - [x] `setBlockText` - 设置块文本
 - [x] `setHtml` - 设置 HTML
@@ -41,6 +44,7 @@
 - [x] `setElementText` - 设置元素文本
 
 ### 4. 事件系统 event.ts
+
 - [x] `on` - 绑定事件
 - [x] `delegate` - 事件委托
 - [x] `delegateEvents` - 委托事件
@@ -48,6 +52,7 @@
 - [x] `createInvoker` - 创建事件调用器 [遗留有 currentInstance]
 
 ### 5. 渲染系统
+
 - `renderEffect` - 渲染效果
 - `createIf` - 创建条件渲染
 - `createKeyedFragment` - 创建键控片段
@@ -58,6 +63,7 @@
 - `createDynamicComponent` - 创建动态组件
 
 ### 6. 组件系统
+
 - `createComponent` - 创建组件
 - `createComponentWithFallback` - 创建带回退的组件
 - `createPlainElement` - 创建普通元素
@@ -66,17 +72,21 @@
 - `VaporComponentInstance` - Vapor 组件实例类型
 
 ### 7. 插槽系统
+
 - `createSlot` - 创建插槽
 - `withVaporCtx` - 使用 Vapor 上下文
 
 ### 8. 模板操作
+
 - `template` - 模板操作
 - `createTemplateRefSetter` - 创建模板引用设置器
 
 ### 9. CSS 变量
+
 - `useVaporCssVars` - 使用 Vapor CSS 变量
 
 ### 10. 指令系统
+
 - `applyVShow` - 应用 v-show 指令
 - `applyTextModel` - 应用文本模型
 - `applyRadioModel` - 应用单选框模型
@@ -86,23 +96,27 @@
 - `withVaporDirectives` - 使用 Vapor 指令
 
 ### 11. 片段系统
+
 - `isFragment` - 检查是否为片段
 - `VaporFragment` - Vapor 片段
 - `DynamicFragment` - 动态片段
 
 ### 12. 内置组件
+
 - `VaporTeleport` - Vapor 传送门组件
 - `VaporKeepAlive` - Vapor 保持活跃组件
 - `VaporTransition` - Vapor 过渡组件
 - `VaporTransitionGroup` - Vapor 过渡组组件
 
 ### 13. 应用系统
+
 - `createVaporApp` - 创建 Vapor 应用实例
 - `defineVaporComponent` - 定义 Vapor 组件
 - `defineVaporAsyncComponent` - 定义 Vapor 异步组件
 - `defineVaporCustomElement` - 定义 Vapor 自定义元素
 
 ### 14. 类型定义
+
 - `VaporComponent` - Vapor 组件类型
 - `VaporComponentOptions` - Vapor 组件选项类型
 - `VaporSlot` - Vapor 插槽类型
@@ -118,48 +132,57 @@
 ## 二、开发步骤
 
 ### 阶段 1：项目初始化（1-2 天）
+
 1. 创建项目目录结构
 2. 配置构建工具（Vite/Rollup）
 3. 初始化 TypeScript 配置
 4. 设置基础测试环境
 
 ### 阶段 2：核心 DOM 操作（2-3 天）
+
 1. 实现基础 DOM 操作函数
 2. 实现块操作相关功能
 3. 编写单元测试
 
 ### 阶段 3：属性和事件系统（2-3 天）
+
 1. 实现属性操作函数
 2. 实现事件系统
 3. 编写集成测试
 
 ### 阶段 4：渲染系统（3-4 天）
+
 1. 实现渲染效果和条件渲染
 2. 实现列表渲染和动态组件
 3. 测试渲染性能
 
 ### 阶段 5：组件系统（3-4 天）
+
 1. 实现组件创建和管理
 2. 实现插槽系统
 3. 实现模板操作
 4. 编写组件测试
 
 ### 阶段 6：指令和内置组件（2-3 天）
+
 1. 实现指令系统
 2. 实现内置组件
 3. 测试组件交互
 
 ### 阶段 7：应用系统（2-3 天）
+
 1. 实现应用创建和管理
 2. 实现生命周期钩子
 3. 测试完整应用流程
 
 ### 阶段 8：类型定义和文档（2-3 天）
+
 1. 完善 TypeScript 类型定义
 2. 编写 API 文档
 3. 优化代码结构
 
 ### 阶段 9：性能优化和测试（2-3 天）
+
 1. 性能测试和优化
 2. 兼容性测试
 3. 回归测试

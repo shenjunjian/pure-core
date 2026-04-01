@@ -4,49 +4,49 @@
 
 ### 1. 核心函数（App 相关）
 
-| 导出 | 说明 |
-|------|------|
-| `render` | 根渲染函数 |
-| `hydrate` | 水合函数 |
-| `createApp` | 创建 DOM 应用 |
+| 导出           | 说明          |
+| -------------- | ------------- |
+| `render`       | 根渲染函数    |
+| `hydrate`      | 水合函数      |
+| `createApp`    | 创建 DOM 应用 |
 | `createSSRApp` | 创建 SSR 应用 |
-| `nodeOps` | DOM 节点操作 |
-| `patchProp` | 属性 patching |
+| `nodeOps`      | DOM 节点操作  |
+| `patchProp`    | 属性 patching |
 
 ---
 
 ### 2. 自定义元素 (Custom Elements)
 
-| 导出 | 说明 |
-|------|------|
-| `defineCustomElement` | 定义自定义元素 |
-| `defineSSRCustomElement` | 定义 SSR 自定义元素 |
-| `VueElement` | Vue 自定义元素基类 |
-| `VueElementBase` | Vue 元素基础类 |
-| `useShadowRoot` | 使用 Shadow DOM |
-| `useHost` | 使用宿主元素 |
+| 导出                           | 说明                   |
+| ------------------------------ | ---------------------- |
+| `defineCustomElement`          | 定义自定义元素         |
+| `defineSSRCustomElement`       | 定义 SSR 自定义元素    |
+| `VueElement`                   | Vue 自定义元素基类     |
+| `VueElementBase`               | Vue 元素基础类         |
+| `useShadowRoot`                | 使用 Shadow DOM        |
+| `useHost`                      | 使用宿主元素           |
 | `VueElementConstructor` (type) | 自定义元素构造函数类型 |
-| `CustomElementOptions` (type) | 自定义元素选项类型 |
+| `CustomElementOptions` (type)  | 自定义元素选项类型     |
 
 ---
 
 ### 3. CSS 相关工具
 
-| 导出 | 说明 |
-|------|------|
+| 导出           | 说明            |
+| -------------- | --------------- |
 | `useCssModule` | 使用 CSS Module |
-| `useCssVars` | 使用 CSS 变量 |
+| `useCssVars`   | 使用 CSS 变量   |
 
 ---
 
 ### 4. 组件 (Components)
 
-| 导出 | 说明 |
-|------|------|
-| `Transition` | 过渡组件 |
-| `TransitionGroup` | 过渡组组件 |
-| `TransitionProps` (type) | 过渡组件 Props 类型 |
-| `TransitionGroupProps` (type) | 过渡组 Props 类型 |
+| 导出                          | 说明                |
+| ----------------------------- | ------------------- |
+| `Transition`                  | 过渡组件            |
+| `TransitionGroup`             | 过渡组组件          |
+| `TransitionProps` (type)      | 过渡组件 Props 类型 |
+| `TransitionGroupProps` (type) | 过渡组 Props 类型   |
 
 ---
 
@@ -76,16 +76,16 @@
 
 ### 6. JSX
 
-| 导出 | 说明 |
-|------|------|
+| 导出  | 说明                            |
+| ----- | ------------------------------- |
 | `JSX` | JSX 命名空间（从 './jsx' 导出） |
 
 ---
 
 ### 7. SSR 相关
 
-| 导出 | 说明 |
-|------|------|
+| 导出                   | 说明            |
+| ---------------------- | --------------- |
 | `initDirectivesForSSR` | 初始化 SSR 指令 |
 
 ---
