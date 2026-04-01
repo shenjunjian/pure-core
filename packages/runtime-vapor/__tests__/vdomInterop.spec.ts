@@ -12,9 +12,11 @@ import {
   nextTick,
   onActivated,
   onBeforeMount,
+  onBeforeUpdate,
   onDeactivated,
   onMounted,
   onUnmounted,
+  onUpdated,
   provide,
   ref,
   renderSlot,
@@ -29,11 +31,13 @@ import {
 import { makeInteropRender } from './_utils'
 import {
   VaporKeepAlive,
+  VaporTeleport,
   applyTextModel,
   applyVShow,
   child,
   createComponent,
   createDynamicComponent,
+  createForSlots,
   createIf,
   createSlot,
   createTemplateRefSetter,
@@ -43,6 +47,7 @@ import {
   renderEffect,
   setText,
   template,
+  txt,
   vaporInteropPlugin,
   withVaporCtx,
 } from '../src'
@@ -315,6 +320,144 @@ describe('vdomInterop', () => {
       show.value = false
       await nextTick()
       expect(vnodeUnmounted).toHaveBeenCalledTimes(1)
+    })
+
+    test('should invoke vnode and directive mount hooks in VDOM order', async () => {
+      const calls: string[] = []
+      const vCustom = {
+        created: vi.fn(() => calls.push('directive created')),
+        beforeMount: vi.fn(() => calls.push('directive beforeMount')),
+        mounted: vi.fn(() => calls.push('directive mounted')),
+      }
+
+      const VaporChild = defineVaporComponent({
+        setup() {
+          return template('<div>vapor</div>')()
+        },
+      })
+
+      const App = defineComponent({
+        setup() {
+          return () =>
+            withDirectives(
+              h(VaporChild as any, {
+                onVnodeBeforeMount: () => calls.push('vnode beforeMount'),
+                onVnodeMounted: () => calls.push('vnode mounted'),
+              }),
+              [[vCustom]],
+            )
+        },
+      })
+
+      const root = document.createElement('div')
+      const app = createApp(App)
+      app.use(vaporInteropPlugin)
+      app.mount(root)
+      await nextTick()
+
+      expect(calls).toEqual([
+        'vnode beforeMount',
+        'directive created',
+        'directive beforeMount',
+        'directive mounted',
+        'vnode mounted',
+      ])
+    })
+
+    test('should invoke vnode and directive unmount hooks in VDOM order', async () => {
+      const calls: string[] = []
+      const vCustom = {
+        beforeUnmount: vi.fn(() => calls.push('directive beforeUnmount')),
+        unmounted: vi.fn(() => calls.push('directive unmounted')),
+      }
+
+      const VaporChild = defineVaporComponent({
+        setup() {
+          return template('<div>vapor</div>')()
+        },
+      })
+
+      const show = ref(true)
+      const { html } = define({
+        setup() {
+          return () =>
+            show.value
+              ? withDirectives(
+                  h(VaporChild as any, {
+                    onVnodeBeforeUnmount: () =>
+                      calls.push('vnode beforeUnmount'),
+                    onVnodeUnmounted: () => calls.push('vnode unmounted'),
+                  }),
+                  [[vCustom]],
+                )
+              : null
+        },
+      }).render()
+
+      expect(html()).toBe('<div>vapor</div>')
+
+      show.value = false
+      await nextTick()
+
+      expect(calls).toEqual([
+        'vnode beforeUnmount',
+        'directive beforeUnmount',
+        'directive unmounted',
+        'vnode unmounted',
+      ])
+    })
+
+    test('should invoke update hooks in VDOM order on normal updates', async () => {
+      const msg = ref('foo')
+      const calls: string[] = []
+
+      const vCustom = {
+        beforeUpdate: vi.fn(() => calls.push('directive beforeUpdate')),
+        updated: vi.fn(() => calls.push('directive updated')),
+      }
+
+      const VaporChild = defineVaporComponent({
+        props: {
+          msg: String,
+        },
+        setup(props: any) {
+          const n0 = template('<div> </div>', true)() as any
+          const x0 = child(n0) as any
+          renderEffect(() => {
+            setText(x0, props.msg)
+          })
+          return n0
+        },
+      })
+
+      const App = defineComponent({
+        setup() {
+          return () =>
+            withDirectives(
+              h(VaporChild as any, {
+                msg: msg.value,
+                onVnodeBeforeUpdate: () => calls.push('vnode beforeUpdate'),
+                onVnodeUpdated: () => calls.push('vnode updated'),
+              }),
+              [[vCustom]],
+            )
+        },
+      })
+
+      const root = document.createElement('div')
+      const app = createApp(App)
+      app.use(vaporInteropPlugin)
+      app.mount(root)
+
+      msg.value = 'bar'
+      await nextTick()
+
+      expect(calls).toEqual([
+        'vnode beforeUpdate',
+        'directive beforeUpdate',
+        'directive updated',
+        'vnode updated',
+      ])
     })
   })
 
@@ -660,6 +803,47 @@ describe('vdomInterop', () => {
       expect(calls.length).toBe(0)
       app.unmount()
     })
+
+    test('should expose the latest vapor root element in updated hooks', async () => {
+      const useAltRoot = ref(false)
+      const updatedSpy = vi.fn((vnode: any) => {
+        expect((vnode.el as Element).tagName).toBe('P')
+      })
+
+      const VaporChild = defineVaporComponent({
+        props: {
+          alt: Boolean,
+        },
+        setup(props: any) {
+          return createIf(
+            () => props.alt,
+            () => template('<p>alt</p>')(),
+            () => template('<div>base</div>')(),
+          )
+        },
+      })
+
+      const App = defineComponent({
+        setup() {
+          return () =>
+            h(VaporChild as any, {
+              alt: useAltRoot.value,
+              onVnodeUpdated: updatedSpy,
+            })
+        },
+      })
+
+      const root = document.createElement('div')
+      const app = createApp(App)
+      app.use(vaporInteropPlugin)
+      app.mount(root)
+
+      useAltRoot.value = true
+      await nextTick()
+
+      expect(root.querySelector('p')).not.toBeNull()
+      expect(updatedSpy).toHaveBeenCalledTimes(1)
+    })
   })
 
   describe('slots', () => {
@@ -748,6 +932,37 @@ describe('vdomInterop', () => {
       }).render()
 
       expect(html()).toBe('<div>direct call slot</div>')
+    })
+
+    test('slots.default() access should return a stable wrapper', () => {
+      const VDomChild = defineComponent({
+        setup(_, { slots }) {
+          const first = slots.default
+          const second = slots.default
+          return () => h('div', String(first === second))
+        },
+      })
+
+      const VaporChild = defineVaporComponent({
+        setup() {
+          return createComponent(
+            VDomChild as any,
+            null,
+            {
+              default: () => template('stable slot wrapper')(),
+            },
+            true,
+          )
+        },
+      })
+
+      const { html } = define({
+        setup() {
+          return () => h(VaporChild as any)
+        },
+      }).render()
+
+      expect(html()).toBe('<div>true</div>')
     })
 
     test('slots.default() with slot props', () => {
@@ -914,6 +1129,204 @@ describe('vdomInterop', () => {
       }).render()
 
       expect(html()).toBe('<div>forwarded slot</div>')
+    })
+
+    test('dynamic slots via createForSlots should update in vdom child', async () => {
+      const list = ref([0, 1, 2])
+
+      const VDomChild = defineComponent({
+        setup(_, { slots }) {
+          return () => h('div', null, [renderSlot(slots, 'default')])
+        },
+      })
+
+      const VaporParent = defineVaporComponent({
+        setup() {
+          return createComponent(VDomChild as any, null, {
+            $: [
+              () =>
+                createForSlots(list.value, value => ({
+                  name: 'default',
+                  fn: () => {
+                    const n = template('<span> </span>')() as Element
+                    const t = txt(n) as Text
+                    renderEffect(() => setText(t, toDisplayString(value)))
+                    return n
+                  },
+                })),
+            ],
+          })
+        },
+      })
+
+      const { html } = define({
+        setup() {
+          return () => h(VaporParent as any)
+        },
+      }).render()
+
+      // last-wins: shows last item
+      expect(html()).toBe('<div><span>2</span></div>')
+
+      list.value.push(3)
+      await nextTick()
+      expect(html()).toBe('<div><span>3</span></div>')
+
+      list.value.pop()
+      list.value.pop()
+      await nextTick()
+      expect(html()).toBe('<div><span>1</span></div>')
+    })
+
+    test('dynamic slots via createForSlots should re-mount fragment slot in vdom child', async () => {
+      const list = ref([0, 1, 2])
+
+      const VDomChild = defineComponent({
+        setup(_, { slots }) {
+          return () => h('div', null, [renderSlot(slots, 'default')])
+        },
+      })
+
+      const VaporParent = defineVaporComponent({
+        setup() {
+          return createComponent(VDomChild as any, null, {
+            $: [
+              () =>
+                createForSlots(list.value, value => ({
+                  name: 'default',
+                  fn: () =>
+                    createIf(
+                      () => true,
+                      () => {
+                        const n = template('<span> </span>')() as Element
+                        const t = txt(n) as Text
+                        renderEffect(() => setText(t, toDisplayString(value)))
+                        return n
+                      },
+                    ),
+                })),
+            ],
+          })
+        },
+      })
+
+      const { html } = define({
+        setup() {
+          return () => h(VaporParent as any)
+        },
+      }).render()
+
+      expect(html()).toBe('<div><span>2</span><!--if--></div>')
+
+      list.value.push(3)
+      await nextTick()
+      expect(html()).toBe('<div><span>3</span><!--if--></div>')
+
+      list.value.pop()
+      list.value.pop()
+      await nextTick()
+      expect(html()).toBe('<div><span>1</span><!--if--></div>')
+    })
+
+    test('dynamic slot re-mount should stop stale effects from previous slot function', async () => {
+      const list = ref([0, 1])
+      const slotStates = new Map([
+        [0, { text: ref('zero'), runs: vi.fn() }],
+        [1, { text: ref('one'), runs: vi.fn() }],
+        [2, { text: ref('two'), runs: vi.fn() }],
+      ])
+
+      const VDomChild = defineComponent({
+        setup(_, { slots }) {
+          return () => h('div', null, [renderSlot(slots, 'default')])
+        },
+      })
+
+      const VaporParent = defineVaporComponent({
+        setup() {
+          return createComponent(VDomChild as any, null, {
+            $: [
+              () =>
+                createForSlots(list.value, value => ({
+                  name: 'default',
+                  fn: () => {
+                    const state = slotStates.get(value)!
+                    const n = template('<span> </span>')() as Element
+                    const t = txt(n) as Text
+                    renderEffect(() => {
+                      state.runs()
+                      setText(t, state.text.value)
+                    })
+                    return n
+                  },
+                })),
+            ],
+          })
+        },
+      })
+
+      const { html } = define({
+        setup() {
+          return () => h(VaporParent as any)
+        },
+      }).render()
+
+      const firstState = slotStates.get(1)!
+
+      expect(html()).toBe('<div><span>one</span></div>')
+      expect(firstState.runs).toHaveBeenCalledTimes(1)
+
+      list.value.push(2)
+      await nextTick()
+
+      expect(html()).toBe('<div><span>two</span></div>')
+      expect(firstState.runs).toHaveBeenCalledTimes(1)
+
+      firstState.text.value = 'stale-one'
+      await nextTick()
+
+      expect(html()).toBe('<div><span>two</span></div>')
+      expect(firstState.runs).toHaveBeenCalledTimes(1)
+    })
+
+    test('should stop vdom slot outlet effects after outlet unmount', async () => {
+      const showOutlet = ref(true)
+      const msg = ref('one')
+      const track = vi.fn()
+
+      const VaporChild = defineVaporComponent({
+        setup() {
+          return createIf(
+            () => showOutlet.value,
+            () => createSlot('default'),
+          )
+        },
+      })
+
+      const { html } = define({
+        setup() {
+          return () =>
+            h(VaporChild as any, null, {
+              default: () => {
+                track()
+                return [h('span', msg.value)]
+              },
+            })
+        },
+      }).render()
+
+      expect(html()).toBe('<span>one</span><!--if-->')
+      expect(track).toHaveBeenCalledTimes(1)
+
+      showOutlet.value = false
+      await nextTick()
+      expect(html()).toBe('<!--if-->')
+
+      msg.value = 'two'
+      await nextTick()
+
+      expect(track).toHaveBeenCalledTimes(1)
+      expect(html()).toBe('<!--if-->')
     })
   })
 
@@ -2015,7 +2428,7 @@ describe('vdomInterop', () => {
       expect(vnodeMounted).toHaveBeenCalledTimes(2)
     })
 
-    test('should invoke onVnodeBeforeUpdate/onVnodeUpdated on reactivation', async () => {
+    test('should invoke update hooks in VDOM order on reactivation', async () => {
       const VaporChild = defineVaporComponent({
         props: ['msg'],
         setup(props: any) {
@@ -2031,24 +2444,28 @@ describe('vdomInterop', () => {
 
       const current = shallowRef<any>(VaporChild)
       const msg = ref('hello')
-      const beforeUpdateSpy = vi.fn()
-      const updatedSpy = vi.fn()
+      const calls: string[] = []
+      const vDir = {
+        beforeUpdate: vi.fn(() => calls.push('directive beforeUpdate')),
+        updated: vi.fn(() => calls.push('directive updated')),
+      }
 
       const App = defineComponent({
         setup() {
           return () =>
             h(KeepAlive, null, {
               default: () =>
-                h(
-                  resolveDynamicComponent(current.value) as any,
-                  current.value === VaporChild
-                    ? {
+                current.value === VaporChild
+                  ? withDirectives(
+                      h(VaporChild as any, {
                         msg: msg.value,
-                        onVnodeBeforeUpdate: beforeUpdateSpy,
-                        onVnodeUpdated: updatedSpy,
-                      }
-                    : null,
-                ),
+                        onVnodeBeforeUpdate: () =>
+                          calls.push('vnode beforeUpdate'),
+                        onVnodeUpdated: () => calls.push('vnode updated'),
+                      }),
+                      [[vDir]],
+                    )
+                  : h(VdomChild),
             })
         },
       })
@@ -2069,22 +2486,21 @@ describe('vdomInterop', () => {
       // Reactivate — should trigger update hooks
       current.value = VaporChild
       await nextTick()
-      expect(beforeUpdateSpy).toHaveBeenCalledTimes(1)
-      expect(updatedSpy).toHaveBeenCalledTimes(1)
+      expect(calls).toEqual([
+        'vnode beforeUpdate',
+        'directive beforeUpdate',
+        'directive updated',
+        'vnode updated',
+      ])
     })
 
-    test('should invoke directive beforeUpdate/updated on reactivation', async () => {
-      const beforeUpdateSpy = vi.fn()
-      const updatedSpy = vi.fn()
-
-      const vDir = {
-        beforeUpdate: beforeUpdateSpy,
-        updated: updatedSpy,
-      }
+    test('should invoke updated before activated on reactivation', async () => {
+      const calls: string[] = []
 
       const VaporChild = defineVaporComponent({
         props: ['msg'],
         setup(props: any) {
+          onActivated(() => calls.push('activated'))
           return template('<div></div>')()
         },
       })
@@ -2096,7 +2512,7 @@ describe('vdomInterop', () => {
       })
 
       const current = shallowRef<any>(VaporChild)
-      const msg = ref('hello')
+      const msg = ref('one')
 
       const App = defineComponent({
         setup() {
@@ -2104,9 +2520,69 @@ describe('vdomInterop', () => {
             h(KeepAlive, null, {
               default: () =>
                 current.value === VaporChild
-                  ? withDirectives(h(VaporChild as any, { msg: msg.value }), [
-                      [vDir],
-                    ])
+                  ? h(VaporChild as any, {
+                      msg: msg.value,
+                      onVnodeUpdated: () => calls.push('vnode updated'),
+                      onVnodeMounted: () => calls.push('vnode mounted'),
+                    })
+                  : h(VdomChild),
+            })
+        },
+      })
+
+      const root = document.createElement('div')
+      const app = createApp(App)
+      app.use(vaporInteropPlugin)
+      app.mount(root)
+      await nextTick()
+      calls.length = 0
+
+      current.value = VdomChild
+      await nextTick()
+
+      msg.value = 'two'
+      current.value = VaporChild
+      await nextTick()
+
+      expect(calls).toEqual(['vnode updated', 'activated', 'vnode mounted'])
+    })
+
+    test('should expose the latest vapor root element in updated hooks on reactivation', async () => {
+      const VaporChild = defineVaporComponent({
+        props: {
+          alt: Boolean,
+        },
+        setup(props: any) {
+          return createIf(
+            () => props.alt,
+            () => template('<p>alt</p>')(),
+            () => template('<div>base</div>')(),
+          )
+        },
+      })
+
+      const VdomChild = defineComponent({
+        setup() {
+          return () => h('span', 'vdom')
+        },
+      })
+
+      const current = shallowRef<any>(VaporChild)
+      const useAltRoot = ref(false)
+      const updatedSpy = vi.fn((vnode: any) => {
+        expect((vnode.el as Element).tagName).toBe('P')
+      })
+
+      const App = defineComponent({
+        setup() {
+          return () =>
+            h(KeepAlive, null, {
+              default: () =>
+                current.value === VaporChild
+                  ? h(VaporChild as any, {
+                      alt: useAltRoot.value,
+                      onVnodeUpdated: updatedSpy,
+                    })
                   : h(VdomChild),
             })
         },
@@ -2118,17 +2594,14 @@ describe('vdomInterop', () => {
       app.mount(root)
       await nextTick()
 
-      // Deactivate vapor child
       current.value = VdomChild
       await nextTick()
 
-      // Change props while deactivated
-      msg.value = 'world'
-
-      // Reactivate — should trigger directive update hooks
+      useAltRoot.value = true
       current.value = VaporChild
       await nextTick()
-      expect(beforeUpdateSpy).toHaveBeenCalledTimes(1)
+
+      expect(root.querySelector('p')).not.toBeNull()
       expect(updatedSpy).toHaveBeenCalledTimes(1)
     })
 
@@ -2232,10 +2705,288 @@ describe('vdomInterop', () => {
         target.remove()
       }
     })
+
+    test('should patch vdom slot content in the new teleport target after move', async () => {
+      const targetA = document.createElement('div')
+      targetA.id = 'interop-slot-target-a'
+      const targetB = document.createElement('div')
+      targetB.id = 'interop-slot-target-b'
+      document.body.append(targetA, targetB)
+
+      const to = ref('#interop-slot-target-a')
+      const useAltRoot = ref(false)
+
+      try {
+        const VaporChild = defineVaporComponent({
+          setup() {
+            return createComponent(
+              VaporTeleport,
+              {
+                to: () => to.value,
+              },
+              {
+                default: () => createSlot('default'),
+              },
+            )
+          },
+        })
+
+        const App = defineComponent({
+          setup() {
+            return () =>
+              h(VaporChild as any, null, {
+                default: () => [
+                  useAltRoot.value ? h('p', 'moved') : h('div', 'initial'),
+                ],
+              })
+          },
+        })
+
+        const host = document.createElement('div')
+        const app = createApp(App)
+        app.use(vaporInteropPlugin)
+        app.mount(host)
+        await nextTick()
+
+        expect(targetA.innerHTML).toBe('<div>initial</div>')
+        expect(targetB.innerHTML).toBe('')
+
+        to.value = '#interop-slot-target-b'
+        await nextTick()
+
+        expect(targetA.innerHTML).toBe('')
+        expect(targetB.innerHTML).toBe('<div>initial</div>')
+
+        useAltRoot.value = true
+        await nextTick()
+
+        expect(targetA.innerHTML).toBe('')
+        expect(targetB.innerHTML).toBe('<p>moved</p>')
+      } finally {
+        targetA.remove()
+        targetB.remove()
+      }
+    })
   })
 
   describe('Suspense', () => {
-    test('renders async vapor child inside VDOM Suspense', async () => {
+    test('renders vapor async wrapper inside VDOM Suspense', async () => {
+      const duration = 5
+
+      const VaporAsyncChild = defineVaporAsyncComponent({
+        loader: () =>
+          new Promise(resolve => {
+            setTimeout(() => {
+              resolve(
+                defineVaporComponent({
+                  setup() {
+                    return template('<div><button>click</button></div>')()
+                  },
+                }) as any,
+              )
+            }, duration)
+          }),
+      })
+
+      const VaporParent = defineVaporComponent({
+        setup() {
+          return createComponent(
+            Suspense as any,
+            null,
+            {
+              default: () => createComponent(VaporAsyncChild, null, null, true),
+              fallback: () => template('loading')(),
+            },
+            true,
+          )
+        },
+      })
+
+      const { html } = define({
+        setup() {
+          return () => h(VaporParent as any)
+        },
+      }).render()
+
+      expect(html()).toContain('loading')
+
+      await new Promise(resolve => setTimeout(resolve, duration + 1))
+      await nextTick()
+
+      expect(html()).toContain('<div><button>click</button></div>')
+    })
+
+    test('does not suspend vapor async wrapper with suspensible false inside VDOM Suspense', async () => {
+      const duration = 5
+
+      const VaporAsyncChild = defineVaporAsyncComponent({
+        loader: () =>
+          new Promise(resolve => {
+            setTimeout(() => {
+              resolve(
+                defineVaporComponent({
+                  setup() {
+                    return template('<div><button>click</button></div>')()
+                  },
+                }) as any,
+              )
+            }, duration)
+          }),
+        suspensible: false,
+      })
+
+      const VaporParent = defineVaporComponent({
+        setup() {
+          return createComponent(
+            Suspense as any,
+            null,
+            {
+              default: () => createComponent(VaporAsyncChild, null, null, true),
+              fallback: () => template('loading')(),
+            },
+            true,
+          )
+        },
+      })
+
+      const { html } = define({
+        setup() {
+          return () => h(VaporParent as any)
+        },
+      }).render()
+
+      expect(html()).not.toContain('loading')
+      expect(html()).toContain('<!--async component-->')
+
+      await new Promise(resolve => setTimeout(resolve, duration + 1))
+      await nextTick()
+
+      expect(html()).toContain('<div><button>click</button></div>')
+    })
+
+    test('renders error component for vapor async wrapper inside VDOM Suspense', async () => {
+      const tick = () => new Promise(resolve => setTimeout(resolve))
+
+      let reject!: (error: Error) => void
+      const VaporAsyncChild = defineVaporAsyncComponent({
+        loader: () =>
+          new Promise((_resolve, _reject) => {
+            reject = _reject as (error: Error) => void
+          }),
+        errorComponent: defineVaporComponent({
+          props: ['error'],
+          setup(props: { error: Error }) {
+            return template(props.error.message)()
+          },
+        }),
+      })
+
+      const VaporParent = defineVaporComponent({
+        setup() {
+          return createComponent(
+            Suspense as any,
+            null,
+            {
+              default: () => createComponent(VaporAsyncChild, null, null, true),
+              fallback: () => template('loading')(),
+            },
+            true,
+          )
+        },
+      })
+
+      const host = document.createElement('div')
+      const app = createApp({
+        render: () => h(VaporParent as any),
+      })
+      const errorHandler = vi.fn()
+      app.use(vaporInteropPlugin)
+      app.config.errorHandler = errorHandler
+      try {
+        app.mount(host)
+
+        expect(host.innerHTML).toContain('loading')
+
+        reject(new Error('errored out'))
+        await tick()
+        await nextTick()
+
+        expect(errorHandler).toHaveBeenCalled()
+        expect(host.innerHTML).toContain('errored out')
+      } finally {
+        app.unmount()
+        host.remove()
+      }
+    })
+
+    test('does not fall through slots to error component for vapor async wrapper inside VDOM Suspense', async () => {
+      const tick = () => new Promise(resolve => setTimeout(resolve))
+
+      let reject!: (error: Error) => void
+      const VaporAsyncChild = defineVaporAsyncComponent({
+        loader: () =>
+          new Promise((_resolve, _reject) => {
+            reject = _reject as (error: Error) => void
+          }),
+        errorComponent: defineVaporComponent({
+          setup() {
+            const n0 = template('<div>error</div>')()
+            insert(createSlot('default'), n0 as any as ParentNode)
+            return n0
+          },
+        }),
+      })
+
+      const VaporParent = defineVaporComponent({
+        setup() {
+          return createComponent(
+            Suspense as any,
+            null,
+            {
+              default: () =>
+                createComponent(
+                  VaporAsyncChild,
+                  null,
+                  {
+                    default: withVaporCtx(() =>
+                      template('<span>slot content</span>')(),
+                    ),
+                  },
+                  true,
+                ),
+              fallback: () => template('loading')(),
+            },
+            true,
+          )
+        },
+      })
+
+      const host = document.createElement('div')
+      const app = createApp({
+        render: () => h(VaporParent as any),
+      })
+      app.use(vaporInteropPlugin)
+      const errorHandler = vi.fn()
+      app.config.errorHandler = errorHandler
+      try {
+        app.mount(host)
+
+        expect(host.innerHTML).toContain('loading')
+
+        reject(new Error('errored out'))
+        await tick()
+        await nextTick()
+
+        expect(errorHandler).toHaveBeenCalled()
+        expect(host.innerHTML).toContain('error')
+        expect(host.innerHTML).not.toContain('slot content')
+      } finally {
+        app.unmount()
+        host.remove()
+      }
+    })
+
+    test('renders async setup vapor component inside VDOM Suspense', async () => {
       const duration = 5
 
       const VaporAsyncChild = defineVaporComponent({
@@ -2457,6 +3208,62 @@ describe('vdomInterop', () => {
       show.value = false
       await nextTick()
       expect(beforeUnmountSpy).toHaveBeenCalledTimes(1)
+    })
+
+    test('should invoke update hooks in VDOM order on vapor child self-update', async () => {
+      const calls: string[] = []
+      let flip!: () => void
+
+      const VaporChild = defineVaporComponent({
+        setup() {
+          const alt = ref(false)
+          onBeforeUpdate(() => calls.push('component beforeUpdate'))
+          onUpdated(() => calls.push('component updated'))
+          flip = () => {
+            alt.value = true
+          }
+          return createIf(
+            () => alt.value,
+            () => template('<p>alt</p>')(),
+            () => template('<div>base</div>')(),
+          )
+        },
+      })
+
+      const App = defineComponent({
+        setup() {
+          return () =>
+            h(VaporChild as any, {
+              onVnodeBeforeUpdate: (vnode: any, prevVNode: any) => {
+                expect((vnode.el as Element).tagName).toBe('DIV')
+                expect((prevVNode.el as Element).tagName).toBe('DIV')
+                calls.push('vnode beforeUpdate')
+              },
+              onVnodeUpdated: (vnode: any) => {
+                expect((vnode.el as Element).tagName).toBe('P')
+                calls.push('vnode updated')
+              },
+            })
+        },
+      })
+
+      const root = document.createElement('div')
+      const app = createApp(App)
+      app.use(vaporInteropPlugin)
+      app.mount(root)
+
+      expect(root.querySelector('div')!.textContent).toBe('base')
+
+      flip()
+      await nextTick()
+
+      expect(root.querySelector('p')!.textContent).toBe('alt')
+      expect(calls).toEqual([
+        'component beforeUpdate',
+        'vnode beforeUpdate',
+        'component updated',
+        'vnode updated',
+      ])
     })
   })
 })

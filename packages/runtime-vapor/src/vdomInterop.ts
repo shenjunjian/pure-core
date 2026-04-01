@@ -47,6 +47,7 @@ import {
   setRef as vdomSetRef,
   warn,
 } from '@vue/runtime-dom'
+import { effectScope } from '@vue/reactivity'
 import {
   type LooseRawProps,
   type LooseRawSlots,
@@ -95,6 +96,7 @@ import {
   hydrateNode as vaporHydrateNode,
 } from './dom/hydration'
 import {
+  SlotFragment,
   VaporFragment,
   attachSlotFallback,
   isFragment,
@@ -142,6 +144,7 @@ const vaporInteropImpl: Omit<
     parentComponent,
     parentSuspense,
     onBeforeMount,
+    onVnodeBeforeMount,
   ) {
     let selfAnchor = (vnode.anchor = createTextNode())
     if (isHydrating) {
@@ -182,9 +185,11 @@ const vaporInteropImpl: Omit<
     ))
     instance.rawPropsRef = propsRef
     instance.rawSlotsRef = slotsRef
+    ensureVNodeHookState(instance, vnode)
 
     // copy the shape flag from the vdom component if inside a keep-alive
-    if (isKeepAlive(parentComponent)) instance.shapeFlag = vnode.shapeFlag
+    if (parentComponent && isKeepAlive(parentComponent))
+      instance.shapeFlag = vnode.shapeFlag
 
     if (vnode.transition) {
       setVaporTransitionHooks(
@@ -201,6 +206,8 @@ const vaporInteropImpl: Omit<
     if (rootEl) {
       vnode.el = rootEl
     }
+    // align with VDOM: vnode beforeMount runs before directive created/beforeMount.
+    onVnodeBeforeMount && onVnodeBeforeMount()
     // invoke directive hooks only when we have a valid root element
     if (vnode.dirs) {
       if (rootEl) {
@@ -216,58 +223,44 @@ const vaporInteropImpl: Omit<
       }
     }
 
-    // invoke onVnodeBeforeMount hook
-    const vnodeBeforeMountHook = vnode.props && vnode.props.onVnodeBeforeMount
-    if (vnodeBeforeMountHook) {
-      callWithAsyncErrorHandling(
-        vnodeBeforeMountHook,
-        parentComponent,
-        ErrorCodes.VNODE_HOOK,
-        [vnode],
-      )
-    }
-
     mountComponent(instance, container, selfAnchor)
-
-    // invoke onVnodeMounted hook
-    queuePostFlushCb(() => {
-      const vnodeHook = vnode.props && vnode.props.onVnodeMounted
-      if (vnodeHook) {
-        callWithAsyncErrorHandling(
-          vnodeHook,
-          parentComponent,
-          ErrorCodes.VNODE_HOOK,
-          [vnode],
-        )
-      }
-    })
 
     simpleSetCurrentInstance(prev)
     return instance
   },
 
-  update(n1, n2, shouldUpdate, onBeforeUpdate) {
+  update(n1, n2, shouldUpdate, onBeforeUpdate, onVnodeBeforeUpdate) {
     n2.component = n1.component
-    n2.el = n2.anchor = n1.anchor
+    n2.el = n1.el
+    n2.anchor = n1.anchor
 
     const instance = n2.component as any as VaporComponentInstance
-
-    const rootEl = getRootElement(instance)
-    if (rootEl) {
-      n2.el = rootEl
-    }
-    // invoke directive hooks only when we have a valid root element
-    if (n2.dirs) {
-      if (rootEl) {
-        onBeforeUpdate && onBeforeUpdate()
-      } else {
-        n2.dirs = null
-      }
-    }
+    const vnodeHookState = ensureVNodeHookState(instance, n2)
 
     if (shouldUpdate) {
+      const rootEl = getRootElement(instance)
+      if (rootEl) {
+        n2.el = rootEl
+      }
+      // align with VDOM: vnode beforeUpdate runs before directive beforeUpdate.
+      onVnodeBeforeUpdate && onVnodeBeforeUpdate()
+      // invoke directive hooks only when we have a valid root element
+      if (n2.dirs) {
+        if (rootEl) {
+          onBeforeUpdate && onBeforeUpdate()
+        } else {
+          n2.dirs = null
+        }
+      }
+      vnodeHookState.skipVnodeHooks = true
       instance.rawPropsRef!.value = filterReservedProps(n2.props)
       instance.rawSlotsRef!.value = n2.children
+      queuePostFlushCb(() => {
+        syncVNodeEl(n2, instance)
+        if (!instance.isUpdating) {
+          vnodeHookState.skipVnodeHooks = false
+        }
+      })
     }
   },
 
@@ -281,20 +274,9 @@ const vaporInteropImpl: Omit<
       }
     } else if (vnode.vb) {
       remove(vnode.vb, container)
+      stopVaporSlotScope(vnode)
     }
     remove(vnode.anchor as Node, container)
-    // invoke onVnodeUnmounted hook
-    const vnodeHook = vnode.props && vnode.props.onVnodeUnmounted
-    if (vnodeHook) {
-      queuePostFlushCb(() => {
-        callWithAsyncErrorHandling(
-          vnodeHook,
-          instance && instance.parent,
-          ErrorCodes.VNODE_HOOK,
-          [vnode],
-        )
-      })
-    }
   },
 
   /**
@@ -309,40 +291,48 @@ const vaporInteropImpl: Omit<
     parentSuspense,
   ) {
     if (!n1) {
-      const prev = currentInstance
-      let prevSuspense: SuspenseBoundary | null = null
-      simpleSetCurrentInstance(parentComponent)
-      if (__FEATURE_SUSPENSE__ && parentSuspense) {
-        prevSuspense = setParentSuspense(parentSuspense)
-      }
       // mount
-      let selfAnchor: Node | undefined
-      const { slot, fallback } = n2.vs!
-      const propsRef = (n2.vs!.ref = shallowRef(n2.props))
-      let slotBlock = slot(new Proxy(propsRef, vaporSlotPropsProxyHandler))
-      if (fallback) {
-        const vaporFallback = createVaporFallback(fallback, parentComponent)
-        const emptyFrag = attachSlotFallback(slotBlock, vaporFallback)
-        if (!isValidBlock(slotBlock)) {
-          slotBlock = renderSlotFallback(slotBlock, vaporFallback, emptyFrag)
-        }
-      }
-      if (isFragment(slotBlock)) {
+      const slotBlock = renderVaporSlot(n2, parentComponent, parentSuspense)
+      const selfAnchor =
         // use fragment's anchor when possible
-        selfAnchor = slotBlock.anchor
-      }
-      if (__FEATURE_SUSPENSE__ && parentSuspense) {
-        setParentSuspense(prevSuspense)
-      }
-      simpleSetCurrentInstance(prev)
-      if (!selfAnchor) selfAnchor = createTextNode()
+        (isFragment(slotBlock) ? slotBlock.anchor : undefined) ||
+        createTextNode()
       insert((n2.el = n2.anchor = selfAnchor), container, anchor)
       insert((n2.vb = slotBlock), container, selfAnchor)
     } else {
       // update
-      n2.el = n2.anchor = n1.anchor
-      n2.vb = n1.vb
-      ;(n2.vs!.ref = n1.vs!.ref)!.value = n2.props
+      // slot function changed (e.g. dynamic slots from _createForSlots),
+      // need to re-mount the vapor block
+      if (n2.vs!.slot !== n1.vs!.slot) {
+        const selfAnchor = n1.anchor as Node
+        const parent = selfAnchor.parentNode as ParentNode
+        const nextSibling = selfAnchor.nextSibling
+        const oldBlockOwnsAnchor =
+          isFragment(n1.vb!) && n1.vb!.anchor === selfAnchor
+        // remove old vapor block
+        remove(n1.vb!, parent)
+        stopVaporSlotScope(n1)
+        const slotBlock = renderVaporSlot(n2, parentComponent, parentSuspense)
+        let newAnchor = isFragment(slotBlock) ? slotBlock.anchor : undefined
+        let insertAnchor = nextSibling as Node
+        if (newAnchor) {
+          if (!oldBlockOwnsAnchor) {
+            remove(selfAnchor, parent)
+          }
+        } else if (oldBlockOwnsAnchor) {
+          newAnchor = createTextNode()
+        } else {
+          newAnchor = selfAnchor
+          insertAnchor = selfAnchor
+        }
+        insert((n2.el = n2.anchor = newAnchor), parent, insertAnchor)
+        insert((n2.vb = slotBlock), parent, newAnchor)
+      } else {
+        n2.el = n2.anchor = n1.anchor
+        n2.vb = n1.vb
+        ;(n2.vs!.ref = n1.vs!.ref)!.value = n2.props
+        n2.vs!.scope = n1.vs!.scope
+      }
     }
   },
 
@@ -351,25 +341,43 @@ const vaporInteropImpl: Omit<
     move(vnode.anchor as any, container, anchor, moveType)
   },
 
-  hydrate(vnode, node, container, anchor, parentComponent, parentSuspense) {
+  hydrate(
+    vnode,
+    node,
+    container,
+    anchor,
+    parentComponent,
+    parentSuspense,
+    onBeforeMount,
+    onVnodeBeforeMount,
+  ) {
     // Check both vapor's isHydrating (for createVaporSSRApp) and
     // VDOM's isVdomHydrating (for createSSRApp).
     // In CSR (createApp/createVaporApp + vaporInteropPlugin), both are false,
     // so this logic is tree-shaken.
     if (!isHydrating && !isVdomHydrating) return node
     vaporHydrateNode(node, () =>
-      this.mount(vnode, container, anchor, parentComponent, parentSuspense),
+      this.mount(
+        vnode,
+        container,
+        anchor,
+        parentComponent,
+        parentSuspense,
+        onBeforeMount,
+        onVnodeBeforeMount,
+      ),
     )
     return _next(node)
   },
 
-  hydrateSlot(vnode, node) {
+  hydrateSlot(vnode, node, parentComponent, parentSuspense) {
     if (!isHydrating && !isVdomHydrating) return node
-    const { slot } = vnode.vs!
-    const propsRef = (vnode.vs!.ref = shallowRef(vnode.props))
     vaporHydrateNode(node, () => {
-      vnode.vb = slot(new Proxy(propsRef, vaporSlotPropsProxyHandler))
-      vnode.anchor = vnode.el = currentHydrationNode!
+      vnode.vb = renderVaporSlot(vnode, parentComponent, parentSuspense)
+      vnode.anchor = vnode.el =
+        isFragment(vnode.vb) && vnode.vb.anchor
+          ? vnode.vb.anchor
+          : currentHydrationNode!
 
       if (__DEV__ && !vnode.anchor) {
         throw new Error(
@@ -397,6 +405,7 @@ const vaporInteropImpl: Omit<
     vnode.component = cached.component
     vnode.anchor = cached.anchor
     const instance = vnode.component as any as VaporComponentInstance
+    const vnodeHookState = ensureVNodeHookState(instance, vnode)
     const rootEl = getRootElement(instance)
     if (rootEl) {
       vnode.el = rootEl
@@ -411,14 +420,10 @@ const vaporInteropImpl: Omit<
       vnode.dirs = null
     }
     const shouldUpdate = shouldUpdateComponent(cached, vnode)
-    activate(instance, container, anchor)
-    insert(vnode.anchor as any, container, anchor)
     if (shouldUpdate) {
+      vnodeHookState.skipVnodeHooks = true
       instance.rawPropsRef!.value = filterReservedProps(vnode.props)
       instance.rawSlotsRef!.value = vnode.children
-      if (vnode.dirs) {
-        invokeDirectiveHook(vnode, cached, parentComponent, 'beforeUpdate')
-      }
       const vnodeBeforeUpdateHook =
         vnode.props && vnode.props.onVnodeBeforeUpdate
       if (vnodeBeforeUpdateHook) {
@@ -429,9 +434,11 @@ const vaporInteropImpl: Omit<
           [vnode, cached],
         )
       }
-    }
-    queuePostFlushCb(() => {
-      if (shouldUpdate) {
+      if (vnode.dirs) {
+        invokeDirectiveHook(vnode, cached, parentComponent, 'beforeUpdate')
+      }
+      queuePostFlushCb(() => {
+        syncVNodeEl(vnode, instance)
         if (vnode.dirs) {
           invokeDirectiveHook(vnode, cached, parentComponent, 'updated')
         }
@@ -444,18 +451,24 @@ const vaporInteropImpl: Omit<
             [vnode, cached],
           )
         }
-      }
-
-      const vnodeMountedHook = vnode.props && vnode.props.onVnodeMounted
-      if (vnodeMountedHook) {
+        if (!instance.isUpdating) {
+          vnodeHookState.skipVnodeHooks = false
+        }
+      })
+    }
+    activate(instance, container, anchor)
+    insert(vnode.anchor as any, container, anchor)
+    const vnodeMountedHook = vnode.props && vnode.props.onVnodeMounted
+    if (vnodeMountedHook) {
+      queuePostFlushCb(() => {
         callWithAsyncErrorHandling(
           vnodeMountedHook,
           parentComponent,
           ErrorCodes.VNODE_HOOK,
           [vnode],
         )
-      }
-    })
+      })
+    }
   },
 
   deactivate(vnode, container) {
@@ -498,17 +511,32 @@ const vaporSlotPropsProxyHandler: ProxyHandler<
   },
 }
 
+// Cache wrappers per raw slots object so repeated `slots.default` access keeps
+// a stable function identity
+const vaporSlotWrappersCache = new WeakMap<
+  object,
+  Map<PropertyKey, { slot: Function; wrapped: Function }>
+>()
+
 const vaporSlotsProxyHandler: ProxyHandler<any> = {
   get(target, key) {
     const slot = target[key]
     if (isFunction(slot)) {
       slot.__vapor = true
+      let wrappers = vaporSlotWrappersCache.get(target)
+      if (!wrappers) vaporSlotWrappersCache.set(target, (wrappers = new Map()))
+      const cached = wrappers.get(key)
+      if (cached && cached.slot === slot) {
+        return cached.wrapped
+      }
+
       // Create a wrapper that internally uses renderSlot for proper vapor slot handling
       // This ensures that calling slots.default() works the same as renderSlot(slots, 'default')
       const wrapped = (props?: Record<string, any>) => [
         renderSlot({ [key]: slot }, key as string, props),
       ]
       ;(wrapped as any).__vs = slot
+      wrappers.set(key, { slot, wrapped })
       return wrapped
     }
     return slot
@@ -714,7 +742,7 @@ function createVDOMComponent(
       ;(component as any)
         .__asyncLoader()
         .then(() => {
-          if (!disposed) keepAliveCtx.cacheBlock()
+          if (!disposed) keepAliveCtx.cacheBlock(frag)
         })
         .catch(NOOP)
     }
@@ -947,12 +975,17 @@ function renderVDOMSlot(
   let isMounted = false
   let currentBlock: Block | null = null
   let currentVNode: VNode | null = null
+  let currentParentNode: ParentNode | undefined
+  let currentAnchor: Node | null | undefined
+  let scope = effectScope()
 
   frag.insert = (parentNode, anchor) => {
     if (isHydrating) return
+    currentParentNode = parentNode
+    currentAnchor = anchor
 
     if (!isMounted) {
-      render(parentNode, anchor)
+      scope.run(render)
       isMounted = true
     } else {
       if (currentVNode) {
@@ -970,18 +1003,19 @@ function renderVDOMSlot(
       }
     }
 
-    frag.remove = parentNode => {
-      if (currentBlock) {
-        remove(currentBlock, parentNode)
-      } else if (currentVNode) {
-        internals.um(currentVNode, parentComponent as any, null, true)
-      }
-    }
-
     if (isMounted && frag.onUpdated) frag.onUpdated.forEach(m => m())
   }
 
-  const render = (parentNode?: ParentNode, anchor?: Node | null) => {
+  frag.remove = parentNode => {
+    scope.stop()
+    if (currentBlock) {
+      remove(currentBlock, parentNode)
+    } else if (currentVNode) {
+      internals.um(currentVNode, parentComponent as any, null, true)
+    }
+  }
+
+  const render = () => {
     const prev = currentInstance
     simpleSetCurrentInstance(instance)
     try {
@@ -1060,14 +1094,14 @@ function renderVDOMSlot(
             frag.$key = getVNodeKey(resolved)
             trackSlotVNodeUpdates(frag, resolved)
             if (currentBlock) {
-              remove(currentBlock, parentNode)
+              remove(currentBlock, currentParentNode)
               currentBlock = null
             }
             internals.p(
               currentVNode,
               resolved,
-              parentNode!,
-              anchor,
+              currentParentNode!,
+              currentAnchor,
               parentComponent as any,
               suspense,
               undefined, // namespace
@@ -1086,16 +1120,16 @@ function renderVDOMSlot(
               currentVNode = null
             }
             if (currentBlock) {
-              remove(currentBlock, parentNode)
+              remove(currentBlock, currentParentNode)
             }
-            insert(resolved, parentNode!, anchor)
+            insert(resolved, currentParentNode!, currentAnchor)
             currentBlock = resolved
             frag.nodes = resolved as any
             return
           }
 
           if (currentBlock) {
-            remove(currentBlock, parentNode)
+            remove(currentBlock, currentParentNode)
             currentBlock = null
           }
           if (currentVNode) {
@@ -1118,7 +1152,9 @@ function renderVDOMSlot(
 
   frag.hydrate = () => {
     if (!isHydrating) return
-    render()
+    scope.run(render)
+    currentParentNode = currentHydrationNode!.parentNode as ParentNode
+    currentAnchor = currentHydrationNode
     isMounted = true
   }
 
@@ -1164,7 +1200,13 @@ function createVaporFallback(
   parentComponent: ComponentInternalInstance | null,
 ): BlockFn {
   const internals = ensureRenderer().internals
-  return () => createFallback(fallback)(internals, parentComponent)
+  return () => {
+    const block = createFallback(fallback)(internals, parentComponent)
+    if (isHydrating && isFragment(block) && block.hydrate) {
+      block.hydrate()
+    }
+    return block
+  }
 }
 
 const createFallback =
@@ -1177,20 +1219,265 @@ const createFallback =
 
     // vnode content, wrap it as a VaporFragment
     if (isArray(fallbackNodes) && fallbackNodes.every(isVNode)) {
-      const frag = new VaporFragment([])
-      frag.insert = (parentNode, anchor) => {
-        fallbackNodes.forEach(vnode => {
-          internals.p(null, vnode, parentNode, anchor, parentComponent)
-        })
-      }
-      frag.remove = parentNode => {
-        fallbackNodes.forEach(vnode => {
-          internals.um(vnode, parentComponent, null, true)
-        })
-      }
-      return frag
+      return createVNodeChildrenFragment(
+        internals,
+        () => fallback() as VNode[],
+        parentComponent,
+      )
     }
 
     // vapor block
     return fallbackNodes as Block
   }
+
+function renderVaporSlot(
+  vnode: VNode,
+  parentComponent: ComponentInternalInstance | null,
+  parentSuspense: SuspenseBoundary | null,
+): Block {
+  const prev = currentInstance
+  let prevSuspense: SuspenseBoundary | null = null
+  simpleSetCurrentInstance(parentComponent)
+  if (__FEATURE_SUSPENSE__ && parentSuspense) {
+    prevSuspense = setParentSuspense(parentSuspense)
+  }
+  try {
+    const { fallback } = vnode.vs!
+    if (isHydrating && fallback) {
+      const frag = new SlotFragment()
+      frag.hydrateWithFallback = true
+      frag.updateSlot(
+        () => invokeVaporSlot(vnode),
+        createVaporFallback(fallback, parentComponent),
+      )
+      return frag
+    }
+
+    if (!fallback) {
+      return invokeVaporSlot(vnode)
+    }
+
+    let slotBlock = invokeVaporSlot(vnode)
+    const vaporFallback = createVaporFallback(fallback, parentComponent)
+    if (!slotBlock) {
+      return vaporFallback()
+    }
+    const emptyFrag = attachSlotFallback(slotBlock, vaporFallback)
+    if (!isValidBlock(slotBlock)) {
+      slotBlock = renderSlotFallback(slotBlock, vaporFallback, emptyFrag)
+    }
+    return slotBlock
+  } finally {
+    if (__FEATURE_SUSPENSE__ && parentSuspense) {
+      setParentSuspense(prevSuspense)
+    }
+    simpleSetCurrentInstance(prev)
+  }
+}
+
+function stopVaporSlotScope(vnode: VNode): void {
+  if (vnode.vs && vnode.vs.scope) {
+    vnode.vs.scope.stop()
+    vnode.vs.scope = undefined
+  }
+}
+
+/**
+ * Slot functions can create renderEffects while evaluating their block.
+ * Those effects live in this dedicated scope so slot re-mount/unmount can
+ * dispose them immediately instead of waiting for the parent component.
+ */
+function invokeVaporSlot(vnode: VNode): Block {
+  const propsRef = (vnode.vs!.ref = shallowRef(vnode.props))
+  const scope = effectScope()
+  vnode.vs!.scope = scope
+  try {
+    return scope.run(() =>
+      vnode.vs!.slot(new Proxy(propsRef, vaporSlotPropsProxyHandler)),
+    )!
+  } catch (e) {
+    vnode.vs!.scope = undefined
+    scope.stop()
+    throw e
+  }
+}
+
+function syncVNodeEl(vnode: VNode, instance: VaporComponentInstance): void {
+  const rootEl = getRootElement(instance)
+  if (rootEl) {
+    vnode.el = rootEl
+  } else {
+    vnode.el = vnode.anchor
+    vnode.dirs = null
+  }
+}
+
+interface VNodeHookState {
+  vnode: VNode
+  skipVnodeHooks: boolean
+}
+
+const vnodeHookStateMap = new WeakMap<VaporComponentInstance, VNodeHookState>()
+
+function ensureVNodeHookState(
+  instance: VaporComponentInstance,
+  vnode: VNode,
+): VNodeHookState {
+  let state = vnodeHookStateMap.get(instance)
+  if (!state) {
+    state = {
+      vnode,
+      skipVnodeHooks: false,
+    }
+    vnodeHookStateMap.set(instance, state)
+    ;(instance.bu || (instance.bu = [])).push(() => {
+      if (state!.skipVnodeHooks) return
+      const vnodeHook =
+        state!.vnode.props && state!.vnode.props.onVnodeBeforeUpdate
+      if (vnodeHook) {
+        callWithAsyncErrorHandling(
+          vnodeHook,
+          instance.parent,
+          ErrorCodes.VNODE_HOOK,
+          [state!.vnode, state!.vnode],
+        )
+      }
+    })
+
+    // Sync the outer component vnode before running any updated hooks so
+    // both component updated hooks and onVnodeUpdated see the latest root el.
+    ;(instance.u || (instance.u = [])).unshift(() =>
+      syncVNodeEl(state!.vnode, instance),
+    )
+    instance.u.push(() => {
+      if (state!.skipVnodeHooks) {
+        state!.skipVnodeHooks = false
+        return
+      }
+      const vnodeHook = state!.vnode.props && state!.vnode.props.onVnodeUpdated
+      if (vnodeHook) {
+        callWithAsyncErrorHandling(
+          vnodeHook,
+          instance.parent,
+          ErrorCodes.VNODE_HOOK,
+          [state!.vnode, state!.vnode],
+        )
+      }
+    })
+  } else {
+    state.vnode = vnode
+  }
+  return state
+}
+
+function createVNodeChildrenFragment(
+  internals: RendererInternals,
+  render: () => VNode[],
+  parentComponent: ComponentInternalInstance | null,
+): VaporFragment {
+  const suspense =
+    currentParentSuspense || (parentComponent && parentComponent.suspense)
+  const frag = new VaporFragment<Block>([])
+  let currentVNode: VNode | null = null
+  let currentChildren: VNode[] = []
+  let currentParentNode: ParentNode | null = null
+  let currentAnchor: Node | null = null
+  let isMounted = false
+  const scope = effectScope()
+
+  const renderContent = () => {
+    const prev = currentInstance
+    simpleSetCurrentInstance(parentComponent)
+    try {
+      renderEffect(() => {
+        const nextChildren = render()
+        if (isHydrating) {
+          nextChildren.forEach(vnode => hydrateVNode(vnode, parentComponent))
+          currentChildren = nextChildren
+          currentVNode = createVNode(Fragment, null, nextChildren)
+          currentParentNode = currentHydrationNode!.parentNode as ParentNode
+          currentAnchor = currentHydrationNode
+        } else if (!currentVNode) {
+          currentChildren = nextChildren
+          currentVNode = createVNode(Fragment, null, nextChildren)
+          if (nextChildren.length) {
+            internals.mc(
+              nextChildren,
+              currentParentNode!,
+              currentAnchor,
+              parentComponent,
+              suspense,
+              undefined,
+              null,
+              false,
+            )
+          }
+        } else {
+          const nextVNode = createVNode(Fragment, null, nextChildren)
+          internals.pc(
+            currentVNode,
+            nextVNode,
+            currentParentNode!,
+            currentAnchor,
+            parentComponent,
+            suspense,
+            undefined,
+            null,
+            false,
+          )
+          currentChildren = nextChildren
+          currentVNode = nextVNode
+        }
+
+        if (currentChildren.length === 0) {
+          frag.nodes = []
+        } else if (currentChildren.length === 1) {
+          frag.nodes = resolveVNodeNodes(currentChildren[0])
+        } else {
+          frag.nodes = currentChildren.map(resolveVNodeNodes) as Block[]
+        }
+
+        if (isMounted && frag.onUpdated) {
+          frag.onUpdated.forEach(hook => hook())
+        }
+      })
+    } finally {
+      simpleSetCurrentInstance(prev)
+    }
+  }
+
+  frag.insert = (parentNode, anchor) => {
+    if (isHydrating) return
+    currentParentNode = parentNode
+    currentAnchor = anchor
+    if (!isMounted) {
+      scope.run(renderContent)
+      isMounted = true
+    } else {
+      currentChildren.forEach(vnode => {
+        internals.m(
+          vnode,
+          parentNode,
+          anchor,
+          MoveType.REORDER,
+          parentComponent as any,
+        )
+      })
+    }
+  }
+
+  frag.remove = parentNode => {
+    scope.stop()
+    currentChildren.forEach(vnode => {
+      internals.um(vnode, parentComponent, null, !!parentNode)
+    })
+  }
+
+  frag.hydrate = () => {
+    if (!isHydrating) return
+    scope.run(renderContent)
+    isMounted = true
+  }
+
+  return frag
+}

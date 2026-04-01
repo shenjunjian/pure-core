@@ -16,11 +16,13 @@ import {
   isAsyncWrapper,
   isTemplateNode,
   leaveCbKey,
+  onBeforeMount,
   queuePostFlushCb,
   resolveTransitionProps,
   useTransitionState,
   warn,
 } from '@vue/runtime-dom'
+import { computed } from '@vue/reactivity'
 import type {
   Block,
   TransitionBlock,
@@ -36,7 +38,7 @@ import {
 import { isArray } from '@vue/shared'
 import { renderEffect } from '../renderEffect'
 import {
-  type DynamicFragment,
+  DynamicFragment,
   ForFragment,
   type VaporFragment,
   isFragment,
@@ -46,6 +48,7 @@ import {
   isHydrating,
   setCurrentHydrationNode,
 } from '../dom/hydration'
+import { type PendingVShow, setCurrentPendingVShows } from '../directives/vShow'
 import { isInteropEnabled } from '../vdomInteropState'
 
 const displayName = 'VaporTransition'
@@ -70,22 +73,38 @@ export const ensureTransitionHooksRegistered = (): void => {
 const hydrateTransitionImpl = () => {
   if (!currentHydrationNode || !isTemplateNode(currentHydrationNode)) return
   // replace <template> node with inner child
-  const {
-    content: { firstChild },
-    parentNode,
-  } = currentHydrationNode
+  const { content, parentNode } = currentHydrationNode
+  const { firstChild } = content
   if (firstChild) {
-    parentNode!.replaceChild(firstChild, currentHydrationNode)
+    let transitionEl: Element | undefined
+    // firstChild may be a fragment anchor comment (e.g. <!--[--> from slotted
+    // content), but appear hooks still need to target the actual element.
+    for (
+      let node: ChildNode | null = firstChild;
+      node;
+      node = node.nextSibling
+    ) {
+      if (node instanceof Element) {
+        transitionEl = node
+        break
+      }
+    }
+
+    parentNode!.insertBefore(content, currentHydrationNode)
+    parentNode!.removeChild(currentHydrationNode)
     setCurrentHydrationNode(firstChild)
 
-    if (firstChild instanceof HTMLElement || firstChild instanceof SVGElement) {
-      const originalDisplay = firstChild.style.display
-      firstChild.style.display = 'none'
+    if (
+      transitionEl instanceof HTMLElement ||
+      transitionEl instanceof SVGElement
+    ) {
+      const originalDisplay = transitionEl.style.display
+      transitionEl.style.display = 'none'
 
       return (hooks: TransitionHooks) => {
-        hooks.beforeEnter(firstChild)
-        firstChild.style.display = originalDisplay
-        queuePostFlushCb(() => hooks.enter(firstChild))
+        hooks.beforeEnter(transitionEl)
+        transitionEl.style.display = originalDisplay
+        queuePostFlushCb(() => hooks.enter(transitionEl))
       }
     }
   }
@@ -107,32 +126,66 @@ export const VaporTransition: FunctionalVaporComponent<TransitionProps> =
     ensureTransitionHooksRegistered()
 
     const performAppear = isHydrating ? hydrateTransitionImpl() : undefined
-
-    const children = (slots.default && slots.default()) as any as Block
-    if (!children) return []
-
+    const state = useTransitionState()
     const instance = currentInstance! as VaporComponentInstance
     const { mode } = props
-    checkTransitionMode(mode)
+    __DEV__ && checkTransitionMode(mode)
 
-    let resolvedProps: BaseTransitionProps<Element>
-    renderEffect(() => (resolvedProps = resolveTransitionProps(props)))
+    const resolvedProps = computed(() => resolveTransitionProps(props))
+    const propsProxy = new Proxy({} as BaseTransitionProps<Element>, {
+      get(_, key) {
+        return resolvedProps.value[key as keyof BaseTransitionProps<Element>]
+      },
+    })
 
-    const hooks = applyTransitionHooksImpl(children, {
-      state: useTransitionState(),
-      // use proxy to keep props reference stable
-      props: new Proxy({} as BaseTransitionProps<Element>, {
-        get(_, key) {
-          return resolvedProps[key as keyof BaseTransitionProps<Element>]
-        },
-      }),
-      instance: instance,
-    } as VaporTransitionHooks)
-
-    if (resolvedProps!.appear && performAppear) {
-      performAppear(hooks)
+    const shouldCaptureVShow = !isHydrating && !!props.appear
+    const shouldPerformAppear = !!props.appear && !!performAppear
+    // Dynamic slot sources can add/remove the default slot after setup, so
+    // Transition needs a DynamicFragment to drive enter/leave on updates.
+    if (instance.rawSlots.$) {
+      const frag = new DynamicFragment('transition')
+      let isMounted = false
+      renderEffect(() => {
+        if (!frag.$transition) {
+          frag.$transition = resolveTransitionHooks(
+            frag,
+            propsProxy,
+            state,
+            instance,
+          )
+        } else {
+          // DynamicFragment.update() reads the fragment hook's mode directly,
+          // so keep it in sync when Transition mode changes reactively.
+          frag.$transition.mode = resolvedProps.value.mode
+        }
+        const [, pendingVShows] = capturePendingVShows(
+          shouldCaptureVShow && !isMounted,
+          () => frag.update(slots.default),
+        )
+        applyPendingVShows(
+          frag.$transition!,
+          resolveTransitionBlock(frag.nodes),
+          pendingVShows,
+        )
+        if (!isMounted && shouldPerformAppear) performAppear(frag.$transition!)
+        isMounted = true
+      })
+      return frag
     }
 
+    const [children, pendingVShows] = capturePendingVShows(
+      shouldCaptureVShow,
+      () => ((slots.default && slots.default()) || []) as any as Block,
+    )
+
+    const { hooks, root } = applyResolvedTransitionHooks(children, {
+      state,
+      // use proxy to keep props reference stable
+      props: propsProxy,
+      instance: instance,
+    } as VaporTransitionHooks)
+    applyPendingVShows(hooks, root, pendingVShows)
+    if (shouldPerformAppear) performAppear(hooks)
     return children
   })
 
@@ -254,20 +307,30 @@ function applyTransitionHooksImpl(
   block: Block,
   hooks: VaporTransitionHooks,
 ): VaporTransitionHooks {
+  return applyResolvedTransitionHooks(block, hooks).hooks
+}
+
+function applyResolvedTransitionHooks(
+  block: Block,
+  hooks: VaporTransitionHooks,
+): {
+  hooks: VaporTransitionHooks
+  root?: ResolvedTransitionBlock
+} {
   // filter out comment nodes
   if (isArray(block)) {
     block = block.filter(b => !(b instanceof Comment))
     if (block.length === 1) {
       block = block[0]
     } else if (block.length === 0) {
-      return hooks
+      return { hooks }
     }
   }
 
   // delegate to TransitionGroup's apply logic for list children
   if (hooks.applyGroup && block instanceof ForFragment) {
     hooks.applyGroup(block, hooks.props, hooks.state, hooks.instance)
-    return hooks
+    return { hooks }
   }
 
   const fragments: VaporFragment[] = []
@@ -279,7 +342,7 @@ function applyTransitionHooksImpl(
     if (__DEV__ && fragments.length === 0) {
       warn('Transition component has no valid child element')
     }
-    return hooks
+    return { hooks }
   }
 
   const { props, instance, state, delayedLeave } = hooks
@@ -290,11 +353,17 @@ function applyTransitionHooksImpl(
     instance,
     hooks => (resolvedHooks = hooks as VaporTransitionHooks),
   )
+  // Dynamic slot updates replace the active hook object. Preserve any
+  // runtime-derived persisted state for slot/component-root v-show.
+  resolvedHooks.persisted = resolvedHooks.persisted || hooks.persisted
   resolvedHooks.delayedLeave = delayedLeave
   child.$transition = resolvedHooks
   fragments.forEach(f => (f.$transition = resolvedHooks))
 
-  return resolvedHooks
+  return {
+    hooks: resolvedHooks,
+    root: child,
+  }
 }
 
 function applyTransitionLeaveHooksImpl(
@@ -466,4 +535,51 @@ export function getTransitionElementFromVNode(
   if (children.length === 1 && children[0] !== vnode) {
     return getTransitionElementFromVNode(children[0])
   }
+}
+
+function capturePendingVShows<T>(
+  enabled: boolean,
+  render: () => T,
+): [block: T, pendingVShows: PendingVShow[] | undefined] {
+  if (!enabled) {
+    return [render(), undefined]
+  }
+
+  const pendingVShows: PendingVShow[] = []
+  const prev = setCurrentPendingVShows(pendingVShows)
+  try {
+    return [render(), pendingVShows]
+  } finally {
+    setCurrentPendingVShows(prev)
+  }
+}
+
+function applyPendingVShows(
+  hooks: VaporTransitionHooks,
+  root: ResolvedTransitionBlock | undefined,
+  pendingVShows: PendingVShow[] | undefined,
+): void {
+  if (!pendingVShows) return
+
+  if (root) {
+    // Keep compiler-injected persisted for direct v-show children, and
+    // additionally treat slot/component roots as persisted when their
+    // deferred v-show target resolves to the same transition root.
+    hooks.persisted =
+      hooks.persisted ||
+      pendingVShows.some(
+        pending =>
+          pending.target === root ||
+          resolveTransitionBlock(pending.target) === root,
+      )
+  }
+
+  onBeforeMount(() => {
+    // Flush the deferred initial v-show writes right before mount so the
+    // DOM is still not inserted, but transition hooks are already ready.
+    for (const pending of pendingVShows) {
+      pending.setDisplay()
+    }
+    pendingVShows.length = 0
+  })
 }

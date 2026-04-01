@@ -6,6 +6,7 @@ import {
   extend,
   isArray,
   isFunction,
+  isModelListener,
   isObject,
   isOn,
   isString,
@@ -23,6 +24,7 @@ import {
 } from './component'
 import type { RawSlots } from './componentSlots'
 import {
+  type EffectScope,
   type ReactiveFlags,
   type Ref,
   type ShallowRef,
@@ -269,6 +271,7 @@ export interface VNode<
     slot: (props: any) => any
     fallback: (() => VNodeArrayChildren) | undefined
     ref?: ShallowRef<any>
+    scope?: EffectScope
   }
   /**
    * @internal Vapor slot Block
@@ -910,6 +913,14 @@ export function mergeProps(...args: (Data & VNodeProps)[]): Data {
           ret[key] = existing
             ? [].concat(existing as any, incoming as any)
             : incoming
+        } else if (
+          incoming == null &&
+          existing == null &&
+          // mergeProps({ 'onUpdate:modelValue': undefined }) should not retain
+          // the model listener.
+          !isModelListener(key)
+        ) {
+          ret[key] = incoming
         }
       } else if (key !== '') {
         ret[key] = toMerge[key]
