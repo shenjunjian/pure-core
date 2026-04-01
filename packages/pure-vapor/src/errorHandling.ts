@@ -114,8 +114,7 @@ export function handleError(
   type: ErrorTypes,
   throwInDev = true,
 ): void {
-  const { errorHandler } =
-    (instance && instance.appContext.config) || EMPTY_OBJ
+  const { errorHandler } = (instance && instance.appContext.config) || EMPTY_OBJ
   if (instance) {
     let cur = instance.parent
     // the exposed instance is the render proxy to keep it consistent with 2.x
@@ -152,8 +151,6 @@ export function handleError(
   logError(err)
 }
 
-function logError(
-  err: unknown,
-) {
+function logError(err: unknown) {
   console.error(err)
 }

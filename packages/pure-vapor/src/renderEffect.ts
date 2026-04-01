@@ -4,7 +4,9 @@ import type { VaporComponentInstance } from './component'
 
 export let currentInstance: VaporComponentInstance | null = null
 
-export function setCurrentInstance(instance: VaporComponentInstance | null): VaporComponentInstance | null {
+export function setCurrentInstance(
+  instance: VaporComponentInstance | null,
+): VaporComponentInstance | null {
   const prev = currentInstance
   currentInstance = instance
   return prev

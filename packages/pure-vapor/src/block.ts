@@ -2,8 +2,6 @@ import { isArray } from '@vue/shared'
 import type { Block } from './types'
 import { VaporComponentInstance } from './component'
 
-
-
 export function insert(
   block: Block,
   parent: ParentNode,
@@ -39,8 +37,6 @@ export function remove(block: Block, parent?: ParentNode): void {
 
 export function isBlock(val: NonNullable<unknown>): val is Block {
   return (
-    val instanceof Node ||
-    isArray(val) ||
-    val instanceof VaporComponentInstance
+    val instanceof Node || isArray(val) || val instanceof VaporComponentInstance
   )
 }

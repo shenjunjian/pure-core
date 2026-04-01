@@ -1,5 +1,12 @@
 import type { App, AppContext, CreateAppFunction } from './types'
-import { createComponent, getExposed, mountComponent, unmountComponent, validateComponentName, VaporComponentInstance } from './component'
+import {
+  createComponent,
+  getExposed,
+  mountComponent,
+  unmountComponent,
+  validateComponentName,
+  VaporComponentInstance,
+} from './component'
 import { NO, isFunction, isString } from '@vue/shared'
 import { version } from './index'
 import { warn } from './warning'
@@ -8,8 +15,7 @@ import { ErrorCodes, callWithAsyncErrorHandling } from './errorHandling'
 import { optimizePropertyLookup } from './dom/prop'
 
 // @internal
-let uid = 0;
-
+let uid = 0
 
 function normalizeContainer<T extends ParentNode>(
   container: T | string,
@@ -43,7 +49,7 @@ export const createVaporApp: CreateAppFunction = (component, props = null) => {
 
   let isMounted = false
 
-  const app: App = appContext.app = {
+  const app: App = (appContext.app = {
     _uid: uid++,
     _component: component,
     _props: props,
@@ -63,7 +69,7 @@ export const createVaporApp: CreateAppFunction = (component, props = null) => {
       } else if (__DEV__) {
         warn(
           `A plugin must either be a function or an object with an "install" ` +
-          `function.`,
+            `function.`,
         )
       }
       return app
@@ -100,43 +106,38 @@ export const createVaporApp: CreateAppFunction = (component, props = null) => {
       if (!isMounted) {
         optimizePropertyLookup()
 
-        container = normalizeContainer(container);
+        container = normalizeContainer(container)
         if (container.nodeType === 1 /* Node.ELEMENT_NODE */) {
           container.textContent = ''
         }
-        const instance = createComponent(
-          component,
-          props,
-          null,
-          appContext,
-        )
+        const instance = createComponent(component, props, null, appContext)
         app._instance = instance
         app._container = container
         const proxy = getExposed(instance)
-
 
         mountComponent(instance, container)
 
         isMounted = true
         if (container instanceof Element) {
-          container.removeAttribute("v-cloak");
-          container.setAttribute("data-v-app", "");
+          container.removeAttribute('v-cloak')
+          container.setAttribute('data-v-app', '')
         }
         return proxy
       } else if (__DEV__) {
         warn(
           `App has already been mounted.\n` +
-          `If you want to remount the same app, move your app creation logic ` +
-          `into a factory function and create fresh app instances for each ` +
-          `mount - e.g. \`const createMyApp = () => createApp(App)\``,
+            `If you want to remount the same app, move your app creation logic ` +
+            `into a factory function and create fresh app instances for each ` +
+            `mount - e.g. \`const createMyApp = () => createApp(App)\``,
         )
       }
-
     },
     onUnmount(cleanupFn: () => void) {
       if (__DEV__ && typeof cleanupFn !== 'function') {
-        warn(`Expected function as first argument to app.onUnmount(), ` +
-          `but got ${typeof cleanupFn}`,)
+        warn(
+          `Expected function as first argument to app.onUnmount(), ` +
+            `but got ${typeof cleanupFn}`,
+        )
       }
       pluginCleanupFns.push(cleanupFn)
     },
@@ -147,14 +148,16 @@ export const createVaporApp: CreateAppFunction = (component, props = null) => {
           app._instance,
           ErrorCodes.APP_UNMOUNT_CLEANUP,
         )
-        unmountComponent(app._instance as VaporComponentInstance, app._container! as ParentNode)
+        unmountComponent(
+          app._instance as VaporComponentInstance,
+          app._container! as ParentNode,
+        )
         app._instance = null
       } else if (__DEV__) {
         warn(`Cannot unmount an app that is not mounted.`)
       }
     },
-  }
-
+  })
 
   return app
 }

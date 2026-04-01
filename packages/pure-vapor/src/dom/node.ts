@@ -36,7 +36,6 @@ export function next(node: Node): Node {
   return node.nextSibling!
 }
 
-
 /*@__NO_SIDE_EFFECTS__*/
 export function nthChild(node: Node, i: number): Node {
   return node.childNodes[i]

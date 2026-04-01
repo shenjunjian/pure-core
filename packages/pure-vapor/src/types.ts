@@ -1,7 +1,9 @@
-import type { VaporComponentInstance } from "./component"
+import type { VaporComponentInstance } from './component'
 
 // Vapor Component Types
-export type VaporComponent = FunctionalVaporComponent<any> | VaporComponentOptions
+export type VaporComponent =
+  | FunctionalVaporComponent<any>
+  | VaporComponentOptions
 
 export type FunctionalVaporComponent<
   Props = {},
@@ -59,9 +61,11 @@ export interface VaporComponentOptions<
 }
 
 // Props and Slots Types
-export type ComponentPropsOptions<P = {}> = P | {
-  [K in keyof P]: any
-}
+export type ComponentPropsOptions<P = {}> =
+  | P
+  | {
+      [K in keyof P]: any
+    }
 
 export type EmitFn<E extends EmitsOptions = {}> = <K extends keyof E>(
   event: K,
@@ -71,13 +75,17 @@ export type EmitFn<E extends EmitsOptions = {}> = <K extends keyof E>(
 export type EmitsOptions = Record<string, any>
 
 export type StaticSlots = Record<string, () => Block>
-export type RawSlots = Record<string, () => Block> | {
-  $: Array<() => Record<string, () => Block>>
-}
+export type RawSlots =
+  | Record<string, () => Block>
+  | {
+      $: Array<() => Record<string, () => Block>>
+    }
 
-export type RawProps = Record<string, any> | {
-  $: Array<() => Record<string, any>>
-}
+export type RawProps =
+  | Record<string, any>
+  | {
+      $: Array<() => Record<string, any>>
+    }
 
 // Block Types
 export type Block = Node | VaporComponentInstance | Block[]

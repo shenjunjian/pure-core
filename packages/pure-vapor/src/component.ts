@@ -1,6 +1,18 @@
 import { EffectScope, onScopeDispose, proxyRefs } from '@vue/reactivity'
-import { EMPTY_OBJ, invokeArrayFns, isBuiltInTag, isFunction, isPromise } from '@vue/shared'
-import type { AppConfig, AppContext, Block, LifecycleHook, VaporComponent } from './types'
+import {
+  EMPTY_OBJ,
+  invokeArrayFns,
+  isBuiltInTag,
+  isFunction,
+  isPromise,
+} from '@vue/shared'
+import type {
+  AppConfig,
+  AppContext,
+  Block,
+  LifecycleHook,
+  VaporComponent,
+} from './types'
 import { insert, isBlock, remove } from './block'
 import { currentInstance, setCurrentInstance } from './renderEffect'
 import { warn } from './warning'
@@ -51,11 +63,11 @@ export function setupComponent(
   const setupFn = component.setup
   const setupResult = setupFn
     ? setupFn(instance.props, {
-      slots: instance.slots,
-      attrs: instance.attrs,
-      emit: instance.emit,
-      expose: instance.expose,
-    }) || EMPTY_OBJ
+        slots: instance.slots,
+        attrs: instance.attrs,
+        emit: instance.emit,
+        expose: instance.expose,
+      }) || EMPTY_OBJ
     : EMPTY_OBJ
 
   // const isAsyncSetup = isPromise(setupResult)
@@ -81,13 +93,14 @@ function handleSetupResult(
     instance.block = setupResult
   } else if (component.render) {
     instance.setupState = proxyRefs(setupResult)
-    instance.block = component.render(
-      instance.setupState,
-      instance.props,
-      instance.emit,
-      instance.attrs,
-      instance.slots,
-    ) || []
+    instance.block =
+      component.render(
+        instance.setupState,
+        instance.props,
+        instance.emit,
+        instance.attrs,
+        instance.slots,
+      ) || []
   } else {
     instance.block = []
   }
@@ -132,8 +145,6 @@ export function getExposed(
   }
 }
 
-
-
 /**
  * @internal
  */
@@ -142,12 +153,11 @@ export function validateComponentName(
   { isNativeTag }: AppConfig,
 ): void {
   if (isBuiltInTag(name) || isNativeTag(name)) {
-    warn('Do not use built-in or reserved HTML elements as component id: ' + name)
+    warn(
+      'Do not use built-in or reserved HTML elements as component id: ' + name,
+    )
   }
 }
-
-
-
 
 // Vapor Component Instance
 export class VaporComponentInstance {
@@ -178,7 +188,6 @@ export class VaporComponentInstance {
 
   emit: EmitFn<Emits>
   emitted: Record<string, boolean> | null
-
 
   expose: (<T extends Record<string, any>>(exposed: T) => void) & string[]
   exposed: Record<string, any> | null
@@ -297,7 +306,7 @@ export class VaporComponentInstance {
       this.isUnmounted =
       this.isUpdating =
       this.isDeactivated =
-      false
+        false
 
     // init props
     // this.rawProps = rawProps || EMPTY_OBJ
@@ -327,10 +336,5 @@ export class VaporComponentInstance {
     // ) as Slots
 
     // this.scopeId = getCurrentScopeId()
-
-
-
-
   }
 }
-

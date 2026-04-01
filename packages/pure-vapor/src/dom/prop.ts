@@ -59,9 +59,9 @@ export function optimizePropertyLookup(): void {
   proto.$fc = proto.$evtclick = undefined
   proto.$root = false
   proto.$html = proto.$cls = proto.$sty = ''
-    // Initialize $txt to undefined instead of empty string to ensure setText()
-    // properly updates the text node even when the value is empty string.
-    // This prevents issues where setText(node, '') would be skipped because
-    // $txt === '' would return true, leaving the original nodeValue unchanged.
-    ; (Text.prototype as any).$txt = undefined
+  // Initialize $txt to undefined instead of empty string to ensure setText()
+  // properly updates the text node even when the value is empty string.
+  // This prevents issues where setText(node, '') would be skipped because
+  // $txt === '' would return true, leaving the original nodeValue unchanged.
+  ;(Text.prototype as any).$txt = undefined
 }

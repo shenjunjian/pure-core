@@ -6,4 +6,3 @@ import 'todomvc-app-css/index.css'
 console.log(PureVapor, 'PureVapor')
 
 createVaporApp(App).mount('#app')
-
