@@ -1,15 +1,11 @@
 v我来分析这个 Vue runtime-core 的调度器文件。
 
-
-        
-            
 toolName: view_files
-            
+
 status: success
-          
-            
+
 filePath: c:\Users\shenj\Desktop\core\packages\runtime-core\src\scheduler.ts
-          
+
 ## 文件作用分析
 
 [scheduler.ts](file://c:\Users\shenj\Desktop\core\packages\runtime-core\src\scheduler.ts) 是 Vue 响应式系统的核心调度器，负责**批量、有序、异步地执行更新任务**。主要功能包括：
@@ -28,7 +24,6 @@ filePath: c:\Users\shenj\Desktop\core\packages\runtime-core\src\scheduler.ts
   - 预处理任务（watchers）：`uid * 2`
   - 组件更新：`uid * 2 + 1`
   - 后置任务：`Infinity`
-  
 - **任务标志**：
   - `QUEUED`：已加入队列
   - `ALLOW_RECURSE`：允许递归触发
@@ -61,7 +56,7 @@ console.log('所有任务已完成')
 
 ```typescript
 // 组件更新函数（带 order 和 flags）
-const componentUpdate = function() {
+const componentUpdate = function () {
   // 更新组件渲染
   this.render()
 } as SchedulerJob
@@ -85,7 +80,7 @@ const preWatcher = () => {
 }
 
 const preJob = preWatcher as SchedulerJob
-preJob.order = component.uid * 2  // 预处理任务 order 为偶数
+preJob.order = component.uid * 2 // 预处理任务 order 为偶数
 preJob.flags = SchedulerJobFlags.ALLOW_RECURSE
 preJob.i = component
 
@@ -124,13 +119,13 @@ flushOnAppMount(rootComponent)
 
 ```typescript
 // ❌ 错误示例：会导致 "Maximum recursive updates exceeded" 错误
-const badWatcher = function() {
+const badWatcher = function () {
   count.value++ // 递归触发自己
 } as SchedulerJob
 badWatcher.flags = SchedulerJobFlags.ALLOW_RECURSE
 
 // ✅ 正确示例：使用 nextTick 避免递归
-const goodWatcher = function() {
+const goodWatcher = function () {
   nextTick(() => {
     count.value++ // 在下一个 tick 中更新
   })
@@ -149,7 +144,7 @@ async function componentUpdateFlow() {
   preWatcher.order = component.uid * 2
   preWatcher.flags = SchedulerJobFlags.ALLOW_RECURSE
   queueJob(preWatcher, component.uid, true)
-  
+
   // 2. 组件更新（order: uid * 2 + 1）
   const componentUpdate = () => {
     console.log('2. 组件更新')
@@ -158,13 +153,13 @@ async function componentUpdateFlow() {
   componentUpdate.flags = SchedulerJobFlags.ALLOW_RECURSE
   componentUpdate.i = component
   queueJob(componentUpdate, component.uid)
-  
+
   // 3. 后置任务（DOM 更新后）
   const postCallback = () => {
     console.log('3. 后置任务')
   }
   queuePostFlushCb(postCallback)
-  
+
   // 4. 等待所有任务完成
   await nextTick()
   console.log('4. 流程完成')
