@@ -17,17 +17,6 @@ import { optimizePropertyLookup } from './dom/prop'
 // @internal
 let uid = 0
 
-function normalizeContainer<T extends ParentNode>(
-  container: T | string,
-): T | null {
-  if (isString(container)) {
-    const res = document.querySelector(container)
-    return res as any
-  }
-
-  return container as any
-}
-
 export const createVaporApp: CreateAppFunction = (component, props = null) => {
   const appContext: AppContext = {
     app: null,
@@ -69,7 +58,7 @@ export const createVaporApp: CreateAppFunction = (component, props = null) => {
       } else if (__DEV__) {
         warn(
           `A plugin must either be a function or an object with an "install" ` +
-            `function.`,
+          `function.`,
         )
       }
       return app
@@ -106,7 +95,7 @@ export const createVaporApp: CreateAppFunction = (component, props = null) => {
       if (!isMounted) {
         optimizePropertyLookup()
 
-        container = normalizeContainer(container)
+        container = isString(container) ? document.querySelector(container) : container
         if (container.nodeType === 1 /* Node.ELEMENT_NODE */) {
           container.textContent = ''
         }
@@ -126,9 +115,9 @@ export const createVaporApp: CreateAppFunction = (component, props = null) => {
       } else if (__DEV__) {
         warn(
           `App has already been mounted.\n` +
-            `If you want to remount the same app, move your app creation logic ` +
-            `into a factory function and create fresh app instances for each ` +
-            `mount - e.g. \`const createMyApp = () => createApp(App)\``,
+          `If you want to remount the same app, move your app creation logic ` +
+          `into a factory function and create fresh app instances for each ` +
+          `mount - e.g. \`const createMyApp = () => createApp(App)\``,
         )
       }
     },
@@ -136,7 +125,7 @@ export const createVaporApp: CreateAppFunction = (component, props = null) => {
       if (__DEV__ && typeof cleanupFn !== 'function') {
         warn(
           `Expected function as first argument to app.onUnmount(), ` +
-            `but got ${typeof cleanupFn}`,
+          `but got ${typeof cleanupFn}`,
         )
       }
       pluginCleanupFns.push(cleanupFn)
