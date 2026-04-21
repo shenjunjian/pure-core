@@ -26,7 +26,9 @@ export function createSlot(
 ): Block {
   // slot 解析优先使用显式 owner（withVaporCtx），否则回退到当前渲染实例。
   const owner = currentSlotOwner || currentInstance
-  const slots = owner ? ((owner.rawSlots || owner.slots) as RawSlots) : undefined
+  const slots = owner
+    ? ((owner.rawSlots || owner.slots) as RawSlots)
+    : undefined
   const slotName = typeof name === 'function' ? name() : name
   const slot = slots && resolveSlot(slots, slotName)
   if (slot) {

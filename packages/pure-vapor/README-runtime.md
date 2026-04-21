@@ -73,4 +73,3 @@ mindmap
 - 控制流路径：`createIf/createFor` 在锚点间做块替换
 - DOM路径：`setDynamicProps` 负责属性同步，`on/delegateEvents` 负责事件绑定与代理
 - 卸载路径：`remove/unmountComponent` 触发生命周期并停止作用域副作用
-

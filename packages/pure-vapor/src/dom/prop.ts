@@ -35,7 +35,10 @@ export function setBlockText(
   }
 }
 
-export function setHtml(el: Element & { $html?: string }, value: unknown): void {
+export function setHtml(
+  el: Element & { $html?: string },
+  value: unknown,
+): void {
   const html = value == null ? '' : String(value)
   if (el.$html !== html) {
     el.innerHTML = html
@@ -53,7 +56,10 @@ export function setBlockHtml(
   }
 }
 
-export function setClass(el: Element & { $cls?: string }, value: unknown): void {
+export function setClass(
+  el: Element & { $cls?: string },
+  value: unknown,
+): void {
   const cls = value == null ? '' : String(value)
   if (el.$cls !== cls) {
     el.className = cls

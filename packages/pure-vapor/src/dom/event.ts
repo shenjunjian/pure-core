@@ -96,9 +96,7 @@ export function delegateEvents(...events: string[]): void {
           }
         }
         target =
-          target.host &&
-          target.host !== target &&
-          target.host instanceof Node
+          target.host && target.host !== target && target.host instanceof Node
             ? target.host
             : target.parentNode
       }

@@ -299,7 +299,7 @@ function normalizeForSource<T>(
     // `v-for="n in number"` 语义：生成 [1...n]。
     const values = new Array(source) as T[]
     for (let i = 0; i < source; i++) {
-      values[i] = ((i + 1) as unknown) as T
+      values[i] = (i + 1) as unknown as T
     }
     return { values }
   }

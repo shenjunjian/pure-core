@@ -132,8 +132,7 @@ export function createDynamicComponent(
   isSingleRoot?: boolean,
   once?: boolean,
 ): Block {
-  const getter =
-    typeof component === 'function' ? component : () => component
+  const getter = typeof component === 'function' ? component : () => component
   let block: Block = createComment('vapor-dynamic-component')
   const render = () => {
     const value = getter()
