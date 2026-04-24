@@ -12,12 +12,13 @@ import { version } from './index'
 import { warn } from './warning'
 import { validateDirectiveName } from './directives'
 import { ErrorCodes, callWithAsyncErrorHandling } from './errorHandling'
-import { optimizePropertyLookup } from './dom/prop'
+import { lifeDispatch } from './lifeEvent'
 
 // @internal
 let uid = 0
 
 export const createVaporApp: CreateAppFunction = (component, props = null) => {
+  void lifeDispatch('beforeCreateApp')
   const appContext: AppContext = {
     app: null,
     config: {
@@ -91,13 +92,21 @@ export const createVaporApp: CreateAppFunction = (component, props = null) => {
       context.directives[name] = directive
       return app
     },
-    mount(container) {
+    mount(_container: string | HTMLElement) {
+      let container
       if (!isMounted) {
-        optimizePropertyLookup()
-
-        container = isString(container)
-          ? document.querySelector(container)
-          : container
+        container = isString(_container)
+          ? document.querySelector(_container)
+          : _container
+        void lifeDispatch('beforeMountApp', {
+          app,
+          appContext,
+          component,
+          props,
+          container,
+          instance: app._instance,
+          isMounted,
+        })
         if (container.nodeType === 1 /* Node.ELEMENT_NODE */) {
           container.textContent = ''
         }
@@ -109,18 +118,20 @@ export const createVaporApp: CreateAppFunction = (component, props = null) => {
         mountComponent(instance, container)
 
         isMounted = true
+        void lifeDispatch('mountedApp', {
+          app,
+          appContext,
+          component,
+          props,
+          container: app._container,
+          instance,
+          isMounted,
+        })
         if (container instanceof Element) {
           container.removeAttribute('v-cloak')
           container.setAttribute('data-v-app', '')
         }
         return proxy
-      } else if (__DEV__) {
-        warn(
-          `App has already been mounted.\n` +
-            `If you want to remount the same app, move your app creation logic ` +
-            `into a factory function and create fresh app instances for each ` +
-            `mount - e.g. \`const createMyApp = () => createApp(App)\``,
-        )
       }
     },
     onUnmount(cleanupFn: () => void) {
@@ -134,6 +145,15 @@ export const createVaporApp: CreateAppFunction = (component, props = null) => {
     },
     unmount() {
       if (isMounted) {
+        void lifeDispatch('beforeUnmountApp', {
+          app,
+          appContext,
+          component,
+          props,
+          container: app._container,
+          instance: app._instance,
+          isMounted,
+        })
         callWithAsyncErrorHandling(
           pluginCleanupFns,
           app._instance,
@@ -144,11 +164,29 @@ export const createVaporApp: CreateAppFunction = (component, props = null) => {
           app._container! as ParentNode,
         )
         app._instance = null
+        void lifeDispatch('unmountedApp', {
+          app,
+          appContext,
+          component,
+          props,
+          container: app._container,
+          instance: app._instance,
+          isMounted: false,
+        })
       } else if (__DEV__) {
         warn(`Cannot unmount an app that is not mounted.`)
       }
     },
   })
 
+  void lifeDispatch('createdApp', {
+    app,
+    appContext,
+    component,
+    props,
+    container: app._container,
+    instance: app._instance,
+    isMounted,
+  })
   return app
 }

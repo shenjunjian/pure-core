@@ -1,6 +1,7 @@
 import { EffectFlags, ReactiveEffect } from '@vue/reactivity'
 import { invokeArrayFns } from '@vue/shared'
 import type { VaporComponentInstance } from './component'
+import { lifeDispatch } from './lifeEvent'
 
 export let currentInstance: VaporComponentInstance | null = null
 
@@ -31,11 +32,21 @@ export class RenderEffect extends ReactiveEffect {
     const prev = setCurrentInstance(instance)
     if (hasUpdateHooks && instance!.isMounted && !instance!.isUpdating) {
       // avoid recurse update until updateJob flushed
+      void lifeDispatch('beforeUpdateComponent', {
+        instance: instance!,
+        effect: this,
+        isUpdating: instance!.isUpdating,
+      })
       instance!.isUpdating = true
       instance!.bu && invokeArrayFns(instance!.bu)
       this.render()
       instance!.isUpdating = false
       instance!.u && invokeArrayFns(instance!.u)
+      void lifeDispatch('updatedComponent', {
+        instance: instance!,
+        effect: this,
+        isUpdating: instance!.isUpdating,
+      })
     } else {
       this.render()
     }

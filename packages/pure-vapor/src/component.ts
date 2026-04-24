@@ -18,6 +18,7 @@ import { createComment } from './dom/node'
 import { setDynamicProps } from './dom/prop'
 import { getSlot } from './slot'
 import { currentInstance, setCurrentInstance } from './renderEffect'
+import { lifeDispatch } from './lifeEvent'
 import { warn } from './warning'
 
 // @internal
@@ -44,6 +45,13 @@ export function createComponent(
   rawSlots?: any,
   appContext?: emptyContext,
 ): VaporComponentInstance {
+  void lifeDispatch('beforeCreateComponent', {
+    component,
+    appContext,
+    parent: currentInstance,
+    rawProps,
+    rawSlots,
+  })
   const instance = new VaporComponentInstance(
     component,
     rawProps,
@@ -52,6 +60,13 @@ export function createComponent(
   )
 
   setupComponent(instance, component)
+  void lifeDispatch('createdComponent', {
+    instance,
+    appContext: instance.appContext,
+    parent: instance.parent,
+    isMounted: instance.isMounted,
+    isUnmounted: instance.isUnmounted,
+  })
 
   return instance
 }
@@ -238,10 +253,28 @@ export function mountComponent(
   anchor?: Node | null,
 ): void {
   // 生命周期调用顺序与 Vue 组件语义保持一致：bm -> 挂载 -> m(异步 flush)
+  void lifeDispatch('beforeMountComponent', {
+    instance,
+    appContext: instance.appContext,
+    parent: instance.parent,
+    parentNode: parent,
+    anchor,
+    isMounted: instance.isMounted,
+    isUnmounted: instance.isUnmounted,
+  })
   if (instance.bm) invokeArrayFns(instance.bm)
   insert(instance.block, parent, anchor)
   if (instance.m) queuePostFlushCb(instance.m)
   instance.isMounted = true
+  void lifeDispatch('mountedComponent', {
+    instance,
+    appContext: instance.appContext,
+    parent: instance.parent,
+    parentNode: parent,
+    anchor,
+    isMounted: instance.isMounted,
+    isUnmounted: instance.isUnmounted,
+  })
 }
 
 export function unmountComponent(
@@ -249,15 +282,35 @@ export function unmountComponent(
   parentNode?: ParentNode,
 ): void {
   // 防止重复卸载：仅首次进入时触发生命周期与 scope 停止。
+  let shouldDispatchUnmounted = false
   if (instance.isMounted && !instance.isUnmounted) {
+    void lifeDispatch('beforeUnmountComponent', {
+      instance,
+      appContext: instance.appContext,
+      parent: instance.parent,
+      parentNode,
+      isMounted: instance.isMounted,
+      isUnmounted: instance.isUnmounted,
+    })
     if (instance.bum) invokeArrayFns(instance.bum)
     instance.scope.stop()
     if (instance.um) invokeArrayFns(instance.um)
     instance.isUnmounted = true
+    shouldDispatchUnmounted = true
   }
 
   if (parentNode) {
     remove(instance.block, parentNode)
+  }
+  if (shouldDispatchUnmounted) {
+    void lifeDispatch('unmountedComponent', {
+      instance,
+      appContext: instance.appContext,
+      parent: instance.parent,
+      parentNode,
+      isMounted: instance.isMounted,
+      isUnmounted: instance.isUnmounted,
+    })
   }
 }
 
