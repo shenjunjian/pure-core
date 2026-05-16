@@ -87,7 +87,7 @@ export function createPlainElement(
   once?: boolean,
 ): Element {
   const el = document.createElement(tag)
-    ; (el as any).$root = isSingleRoot
+  ;(el as any).$root = isSingleRoot
   if (rawProps) {
     // props 可能包含响应式 getter（通过 `$` 数组传入），每次 effect 合并后再打到 DOM。
     const apply = () => setDynamicProps(el, resolveDynamicProps(rawProps))
@@ -163,11 +163,11 @@ export function setupComponent(
   const setupFn = isFunction(component) ? component : component.setup
   const setupResult = setupFn
     ? setupFn(instance.props, {
-      slots: instance.slots,
-      attrs: instance.attrs,
-      emit: instance.emit,
-      expose: instance.expose,
-    }) || EMPTY_OBJ
+        slots: instance.slots,
+        attrs: instance.attrs,
+        emit: instance.emit,
+        expose: instance.expose,
+      }) || EMPTY_OBJ
     : EMPTY_OBJ
 
   // const isAsyncSetup = isPromise(setupResult)
@@ -457,7 +457,7 @@ export class VaporComponentInstance {
       this.isUnmounted =
       this.isUpdating =
       this.isDeactivated =
-      false
+        false
 
     // init props
     this.rawProps = rawProps || EMPTY_OBJ

@@ -57,7 +57,7 @@ export const createVaporApp: CreateAppFunction = (component, props = null) => {
       } else if (__DEV__) {
         warn(
           `A plugin must either be a function or an object with an "install" ` +
-          `function.`,
+            `function.`,
         )
       }
       return app
@@ -118,7 +118,7 @@ export const createVaporApp: CreateAppFunction = (component, props = null) => {
       if (__DEV__ && typeof cleanupFn !== 'function') {
         warn(
           `Expected function as first argument to app.onUnmount(), ` +
-          `but got ${typeof cleanupFn}`,
+            `but got ${typeof cleanupFn}`,
         )
       }
       pluginCleanupFns.push(cleanupFn)
