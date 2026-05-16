@@ -12,13 +12,11 @@ import { version } from './index'
 import { warn } from './warning'
 import { validateDirectiveName } from './directives'
 import { ErrorCodes, callWithAsyncErrorHandling } from './errorHandling'
-import { lifeDispatch } from './lifeEvent'
 
 // @internal
 let uid = 0
 
 export const createVaporApp: CreateAppFunction = (component, props = null) => {
-  void lifeDispatch('beforeCreateApp')
   const appContext: AppContext = {
     app: null,
     config: {
@@ -59,7 +57,7 @@ export const createVaporApp: CreateAppFunction = (component, props = null) => {
       } else if (__DEV__) {
         warn(
           `A plugin must either be a function or an object with an "install" ` +
-            `function.`,
+          `function.`,
         )
       }
       return app
@@ -98,15 +96,6 @@ export const createVaporApp: CreateAppFunction = (component, props = null) => {
         container = isString(_container)
           ? document.querySelector(_container)
           : _container
-        void lifeDispatch('beforeMountApp', {
-          app,
-          appContext,
-          component,
-          props,
-          container,
-          instance: app._instance,
-          isMounted,
-        })
         if (container.nodeType === 1 /* Node.ELEMENT_NODE */) {
           container.textContent = ''
         }
@@ -118,15 +107,6 @@ export const createVaporApp: CreateAppFunction = (component, props = null) => {
         mountComponent(instance, container)
 
         isMounted = true
-        void lifeDispatch('mountedApp', {
-          app,
-          appContext,
-          component,
-          props,
-          container: app._container,
-          instance,
-          isMounted,
-        })
         if (container instanceof Element) {
           container.removeAttribute('v-cloak')
           container.setAttribute('data-v-app', '')
@@ -138,22 +118,13 @@ export const createVaporApp: CreateAppFunction = (component, props = null) => {
       if (__DEV__ && typeof cleanupFn !== 'function') {
         warn(
           `Expected function as first argument to app.onUnmount(), ` +
-            `but got ${typeof cleanupFn}`,
+          `but got ${typeof cleanupFn}`,
         )
       }
       pluginCleanupFns.push(cleanupFn)
     },
     unmount() {
       if (isMounted) {
-        void lifeDispatch('beforeUnmountApp', {
-          app,
-          appContext,
-          component,
-          props,
-          container: app._container,
-          instance: app._instance,
-          isMounted,
-        })
         callWithAsyncErrorHandling(
           pluginCleanupFns,
           app._instance,
@@ -164,29 +135,11 @@ export const createVaporApp: CreateAppFunction = (component, props = null) => {
           app._container! as ParentNode,
         )
         app._instance = null
-        void lifeDispatch('unmountedApp', {
-          app,
-          appContext,
-          component,
-          props,
-          container: app._container,
-          instance: app._instance,
-          isMounted: false,
-        })
       } else if (__DEV__) {
         warn(`Cannot unmount an app that is not mounted.`)
       }
     },
   })
 
-  void lifeDispatch('createdApp', {
-    app,
-    appContext,
-    component,
-    props,
-    container: app._container,
-    instance: app._instance,
-    isMounted,
-  })
   return app
 }
