@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "node scripts/dev.js --format esm-bundler",
-    "devv": "vp dev packages-private/vapor-e2e-test",
+    "devv": "node scripts/build.js pure-vapor -f esm-bundler && vp dev packages-private/vapor-e2e-test",
     "build": "node scripts/build.js",
     "buildv": "node scripts/build.js pure-vapor -f esm-bundler",
     "build-dts": "node scripts/build-types.js",

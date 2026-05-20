@@ -4,10 +4,10 @@ import {
   hasOwn,
   isFunction,
   isObject,
+  isString,
   isBuiltInDirective,
   isBuiltInTag,
 } from '@vue/shared'
-import { getComponentPublicInstance } from './component.js'
 import { ErrorCodes, callWithAsyncErrorHandling } from './errorHandling.js'
 import { warn } from './warning.js'
 
@@ -258,8 +258,4 @@ export function normalizeContainer(container) {
     )
   }
   return container
-}
-
-function isString(val) {
-  return typeof val === 'string'
 }
