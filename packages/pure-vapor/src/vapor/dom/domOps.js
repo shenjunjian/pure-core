@@ -64,6 +64,27 @@ export function domRemoveEventListener(el, event, handler, options) {
   queueDomOp(DomOpType.REMOVE_EVENT_LISTENER, { el, event, handler, options })
 }
 
+export function domSetInnerHTML(el, html) {
+  queueDomOp(DomOpType.SET_INNER_HTML, { el, html })
+}
+
+export function domSetTextContent(el, text) {
+  queueDomOp(DomOpType.SET_TEXT_CONTENT, { el, text })
+}
+
+export function domSetStyleProperty(style, name, value, priority) {
+  queueDomOp(DomOpType.SET_STYLE_PROPERTY, {
+    el: style,
+    name,
+    value,
+    priority: priority || '',
+  })
+}
+
+export function domSetStyleCssText(el, cssText) {
+  queueDomOp(DomOpType.SET_STYLE_CSS_TEXT, { el, cssText })
+}
+
 /** Clear container children before app mount (queued). */
 export function domMountClear(container) {
   while (container.firstChild) {

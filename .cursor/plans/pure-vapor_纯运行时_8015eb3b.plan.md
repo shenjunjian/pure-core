@@ -13,7 +13,7 @@ todos:
     status: completed
   - id: vapor-dom-block
     content: 移植 vapor DOM 层（template/node/prop/event）、block、insertionState、renderEffect、控制流 API；所有 DOM 写操作经 domOps 入队
-    status: pending
+    status: completed
   - id: vapor-component
     content: 移植 component 系统、slots、define* API、createVaporApp、fragment、templateRef
     status: pending

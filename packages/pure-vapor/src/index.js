@@ -195,19 +195,94 @@ export function withDefaults(props, _defaults) {
 export function toHandlers() {
   return {}
 }
-export function withModifiers() {
-  return () => {}
-}
-export function withKeys() {
-  return () => {}
-}
 
 const NOOP_WATCH = () => {}
 
 // ---------------------------------------------------------------------------
-// C. @vue/runtime-vapor — stubs (implemented in src/vapor/ later)
+// C. @vue/runtime-vapor — DOM / block / control flow (vapor-component todo: rest)
 // ---------------------------------------------------------------------------
 
+export {
+  insert,
+  prepend,
+  remove,
+  isBlock,
+  isValidBlock,
+} from './vapor/block.js'
+export {
+  setInsertionState,
+  resetInsertionState,
+} from './vapor/insertionState.js'
+export { renderEffect, RenderEffect } from './vapor/renderEffect.js'
+
+export { template } from './vapor/dom/template.js'
+export {
+  createElement,
+  createTextNode,
+  createComment,
+  querySelector,
+  parentNode,
+  child,
+  nthChild,
+  next,
+  txt,
+} from './vapor/dom/node.js'
+
+export {
+  setProp,
+  setAttr,
+  setDOMProp,
+  setClass,
+  setClassName,
+  setStyle,
+  setValue,
+  setText,
+  setElementText,
+  setBlockText,
+  setHtml,
+  setBlockHtml,
+  setDynamicProps,
+  setDynamicProp,
+  optimizePropertyLookup,
+} from './vapor/dom/prop.js'
+
+export {
+  on,
+  onBinding,
+  delegate,
+  delegateEvents,
+  setDynamicEvents,
+  createInvoker,
+  withVaporModifiers,
+  withVaporKeys,
+} from './vapor/dom/event.js'
+
+export { runWithDomOps, runWithDomOpsSync } from './vapor/dom/domOps.js'
+
+export { createIf } from './vapor/apiCreateIf.js'
+export {
+  createFor,
+  createForSlots,
+  createSelector,
+  getRestElement,
+  getDefaultValue,
+  isForBlock,
+} from './vapor/apiCreateFor.js'
+export { createKeyedFragment } from './vapor/apiCreateFragment.js'
+export { setBlockKey } from './vapor/helpers/setKey.js'
+
+export {
+  VaporFragment,
+  DynamicFragment,
+  ForFragment,
+  ForBlock,
+  isFragment,
+  isDynamicFragment,
+} from './vapor/fragment.js'
+
+export { isVaporComponent } from './vapor/component.js'
+
+// Stubs until vapor-component / vapor-builtin todos
 export function createVaporApp() {
   return {
     mount() {},
@@ -235,79 +310,20 @@ export const VaporElement = function VaporElement() {}
 export const VaporTeleport = {}
 export const VaporKeepAlive = {}
 
-export function insert() {}
-export function prepend() {}
-export function remove() {}
-export function setInsertionState() {}
-
 export function createComponent() {}
 export function createComponentWithFallback() {}
 export function createAssetComponent() {}
 export function createPlainElement() {}
-export function isVaporComponent() {
-  return false
-}
-
-export function renderEffect() {}
 
 export function createSlot() {}
 export function withVaporCtx(fn) {
   return fn()
 }
 
-export function template() {
-  return document.createDocumentFragment()
-}
-export function createTextNode() {
-  return document.createTextNode('')
-}
-export function child() {}
-export function nthChild() {}
-export function next() {}
-export function txt() {}
-
-export function setText() {}
-export function setBlockText() {}
-export function setHtml() {}
-export function setBlockHtml() {}
-export function setClass() {}
-export function setClassName() {}
-export function setStyle() {}
-export function setAttr() {}
-export function setValue() {}
-export function setProp() {}
-export function setDOMProp() {}
-export function setDynamicProps() {}
-export function setElementText() {}
-
-export function on() {}
-export function onBinding() {}
-export function delegate() {}
-export function delegateEvents() {}
-export function setDynamicEvents() {}
-export function createInvoker(fn) {
-  return fn
-}
-export function withVaporModifiers() {
-  return () => {}
-}
-export function withVaporKeys() {
-  return () => {}
-}
-
-export function createIf() {}
-export function createKeyedFragment() {}
-export function createFor() {}
-export function createForSlots() {}
-export function createSelector() {}
-export function getRestElement() {}
-export function getDefaultValue() {}
-
 export function createTemplateRefSetter() {
   return () => {}
 }
 export function useVaporCssVars() {}
-export function setBlockKey() {}
 export function createDynamicComponent() {}
 export function withAsyncContext(fn) {
   return fn()
@@ -321,11 +337,9 @@ export function applySelectModel() {}
 export function applyDynamicModel() {}
 export function withVaporDirectives() {}
 
-export function isFragment() {
-  return false
-}
-export class VaporFragment {}
-export class DynamicFragment {}
+export { withModifiers, withKeys } from './internal/eventModifiers.js'
+
+export { flushDomJobs, getPendingDomOpCount } from './internal/domJobQueue.js'
 
 // ---------------------------------------------------------------------------
 // Migration aliases (vue → pure-vapor)

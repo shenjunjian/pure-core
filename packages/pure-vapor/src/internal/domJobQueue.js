@@ -17,6 +17,10 @@ export const DomOpType = {
   STYLE: 'style',
   ADD_EVENT_LISTENER: 'addEventListener',
   REMOVE_EVENT_LISTENER: 'removeEventListener',
+  SET_INNER_HTML: 'setInnerHTML',
+  SET_TEXT_CONTENT: 'setTextContent',
+  SET_STYLE_PROPERTY: 'setStyleProperty',
+  SET_STYLE_CSS_TEXT: 'setStyleCssText',
 }
 
 const jobDomOperatorList = []
@@ -52,9 +56,14 @@ export function getPendingDomOpCount() {
 
 function playDomOp(record) {
   switch (record.type) {
-    case DomOpType.INSERT_BEFORE:
-      record.parent.insertBefore(record.node, record.anchor)
+    case DomOpType.INSERT_BEFORE: {
+      let anchor = record.anchor
+      if (anchor === 0) {
+        anchor = record.parent.firstChild
+      }
+      record.parent.insertBefore(record.node, anchor)
       break
+    }
     case DomOpType.REMOVE_CHILD:
       record.parent.removeChild(record.child)
       break
@@ -94,6 +103,18 @@ function playDomOp(record) {
         record.handler,
         record.options,
       )
+      break
+    case DomOpType.SET_INNER_HTML:
+      record.el.innerHTML = record.html
+      break
+    case DomOpType.SET_TEXT_CONTENT:
+      record.el.textContent = record.text
+      break
+    case DomOpType.SET_STYLE_PROPERTY:
+      record.el.setProperty(record.name, record.value, record.priority)
+      break
+    case DomOpType.SET_STYLE_CSS_TEXT:
+      record.el.style.cssText = record.cssText
       break
   }
 }
