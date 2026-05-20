@@ -1,6 +1,7 @@
 import { isArray } from '@vue/shared'
 import { getComponentName } from './component.js'
 import { ErrorCodes, handleError } from './errorHandling.js'
+import { registerNextTickCb, scheduleDomFlush } from './domJobQueue.js'
 
 export const SchedulerJobFlags = {
   QUEUED: 1 << 0,
@@ -20,8 +21,20 @@ const resolvedPromise = /*@__PURE__*/ Promise.resolve()
 const RECURSION_LIMIT = 100
 
 export function nextTick(fn) {
-  const p = currentFlushPromise || resolvedPromise
-  return fn ? p.then(fn) : p
+  return new Promise((resolve, reject) => {
+    registerNextTickCb(() => {
+      if (fn) {
+        try {
+          resolve(fn())
+        } catch (err) {
+          reject(err)
+        }
+      } else {
+        resolve()
+      }
+    })
+    scheduleDomFlush()
+  })
 }
 
 function findInsertionIndex(order, queue, start, end) {
@@ -218,6 +231,8 @@ function flushJobs(seen) {
     currentFlushPromise = null
     if (jobsLength || postJobs.length) {
       flushJobs(seen)
+    } else {
+      scheduleDomFlush()
     }
   }
 }

@@ -13,3 +13,12 @@ export * from './warning.js'
 export * from './profiling.js'
 export * from './featureFlags.js'
 export { SchedulerJobFlags } from './scheduler.js'
+export {
+  DomOpType,
+  queueDomOp,
+  flushDomJobs,
+  scheduleDomFlush,
+  runWithDomOps,
+  runWithDomOpsSync,
+  getPendingDomOpCount,
+} from './domJobQueue.js'

@@ -10,7 +10,7 @@ todos:
     status: completed
   - id: dom-job-queue
     content: 实现 DOM 批量调度（jobDomOperatorList、domOps 门面、rAF flush、播放后 nextTick）；作为 pure-vapor 核心差异化能力
-    status: pending
+    status: completed
   - id: vapor-dom-block
     content: 移植 vapor DOM 层（template/node/prop/event）、block、insertionState、renderEffect、控制流 API；所有 DOM 写操作经 domOps 入队
     status: pending

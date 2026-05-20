@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { effect, ref } from '@vue/reactivity'
+import { flushDomJobs } from '../src/internal/domJobQueue.js'
 import {
   LifecycleHooks,
   currentInstance,
@@ -9,11 +10,18 @@ import {
   setCurrentInstance,
 } from '../src/internal/index.js'
 
+async function flushAll() {
+  await Promise.resolve()
+  flushDomJobs()
+}
+
 describe('pure-vapor internal', () => {
   it('queueJob + nextTick flush', async () => {
     const fn = vi.fn()
     queueJob(fn)
-    await nextTick()
+    const p = nextTick()
+    await flushAll()
+    await p
     expect(fn).toHaveBeenCalledTimes(1)
   })
 
@@ -53,7 +61,9 @@ describe('pure-vapor internal', () => {
     })
     const before = runs.length
     count.value++
-    await nextTick()
+    const p = nextTick()
+    await flushAll()
+    await p
     expect(runs.length).toBeGreaterThan(before)
   })
 })
