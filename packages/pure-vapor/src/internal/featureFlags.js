@@ -7,11 +7,6 @@ export function initFeatureFlags() {
 
   const needWarn = []
 
-  if (typeof __FEATURE_OPTIONS_API__ !== 'boolean') {
-    __DEV__ && needWarn.push(`__VUE_OPTIONS_API__`)
-    getGlobalThis().__VUE_OPTIONS_API__ = true
-  }
-
   if (typeof __FEATURE_PROD_DEVTOOLS__ !== 'boolean') {
     __DEV__ && needWarn.push(`__VUE_PROD_DEVTOOLS__`)
     getGlobalThis().__VUE_PROD_DEVTOOLS__ = false

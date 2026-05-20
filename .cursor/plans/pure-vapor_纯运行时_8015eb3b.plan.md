@@ -6,7 +6,7 @@ todos:
     content: 创建 packages/pure-vapor（package.json、index.js、src/index.js、README），配置仅 shared+reactivity 依赖与 esm-bundler 构建
     status: completed
   - id: internal-core
-    content: 实现 src/internal/：scheduler、instance、errorHandling、app、resolveAssets、props、emit、scopeId（不含 transition 运行时）
+    content: 实现 src/internal/：scheduler、instance、errorHandling、app（无 mixin / Options API）、resolveAssets、props、emit、scopeId（不含 transition 运行时）
     status: completed
   - id: dom-job-queue
     content: 实现 DOM 批量调度（jobDomOperatorList、domOps 门面、rAF flush、播放后 nextTick）；作为 pure-vapor 核心差异化能力
@@ -40,6 +40,8 @@ isProject: false
 | 不兼容 VNode / SSR / devtools / VDOM 互操作 | 剔除对应模块与导出；`createVaporSSRApp`、`defineVaporSSRCustomElement`、`vaporInteropPlugin`、hydration、`vdomInterop*` 不实现 |
 | 不实现 Suspense | 不导出 `Suspense`；若模板使用 `<Suspense>`，在文档中标注不支持（编译器仍会生成 import，需在应用层避免） |
 | 首版不做 Transition | 不实现、不导出 `VaporTransition` / `VaporTransitionGroup`；不引入 `internal/transition.js` 及 `block` 中 Transition 专用分支；与 runtime 的 enter/leave 动画钩子解耦 |
+| 仅 Composition API / setup | Vapor 组件只支持 `<script setup>`（及编译期宏）；**不支持** Options API 对象语法（`data` / `methods` / `computed` / `watch` 等 options 字段、`extends`、**mixins**） |
+| 不支持 mixins | `createVaporApp` 不提供 `app.mixin()`；`AppContext` 不含 `mixins` / `optionMergeStrategies` / `optionsCache`；与 `runtime-vapor` 一致（options 归一化缓存在组件 `__propsOptions` / `__emitsOptions` 上，而非 app 级 mixin 合并） |
 | 公开 API 基准 | 以 [`vue/src/index-with-vapor.ts`](packages/vue/src/index-with-vapor.ts) 为准：`./index`（`compile` + `runtime-dom` → `runtime-core`）+ `@vue/runtime-vapor`；实现落在 `pure-vapor/src/index.js`，**减去**下文排除表 |
 | Vapor 运行时符号 | [`runtime-vapor/src/index.ts`](packages/runtime-vapor/src/index.ts) 中符号名保持不变（**减去** SSR / interop / Suspense / Transition） |
 | JavaScript | 全部 `src/**/*.js`，无 `.ts`；`package.json` 不设 `types` 字段 |
@@ -247,7 +249,7 @@ flowchart TB
 | 依赖注入 | `provide`、`inject`、`hasInjectionContext` |
 | 调度 | `nextTick`（pure-vapor：**DOM flush 后**触发，见上文 DOM 队列节） |
 | 组合式工具 | `useAttrs`、`useSlots`、`useModel`、`useTemplateRef`、`useId` |
-| `<script setup>` 宏运行时 | `defineProps`、`defineEmits`、`defineExpose`、`defineOptions`、`defineSlots`、`defineModel`、`withDefaults` |
+| `<script setup>` 宏运行时 | `defineProps`、`defineEmits`、`defineExpose`、`defineSlots`、`defineModel`、`withDefaults`；`defineOptions` 仅作**编译期宏** no-op stub（写入 `name` / `inheritAttrs` 等元数据），**不是** Options API 运行时 |
 | 实例 | `getCurrentInstance` |
 | 异步 setup | `withAsyncContext`（与 runtime-vapor 一致，非仅类型） |
 | 资源解析 / 编译器 CoreHelper | `resolveComponent`、`resolveDirective`、`resolveDynamicComponent`、`NULL_DYNAMIC_COMPONENT` |
@@ -282,6 +284,7 @@ flowchart TB
 | VDOM 内置组件 | `Teleport`、`KeepAlive`、`Suspense`、`BaseTransition`、`Transition`、`TransitionGroup` | Vapor 使用 `Vapor*` 对应项；`Suspense` 明确不做 |
 | Vapor 剔除 | `VaporTransition`、`VaporTransitionGroup`、`vaporInteropPlugin` | 首版不做 Transition；无 VDOM 互操作 |
 | VDOM 指令 / CE | `withDirectives`、`vShow`、`vModelText`、`vModelCheckbox`、`vModelRadio`、`vModelSelect`、`vModelDynamic`、`defineCustomElement`、`VueElement`、`useShadowRoot`、`useHost` | Vapor 使用 `apply*` / `defineVaporCustomElement` |
+| Options API / mixins | `app.mixin()`、`__FEATURE_OPTIONS_API__`、app 级 `mixins` / `optionMergeStrategies` / `optionsCache` | Vapor 仅 setup；与 upstream `runtime-vapor` 相同，不做 mixin 合并 |
 | 互操作 / 兼容 | `vdomInterop*`、`compatUtils`、`DeprecationTypes`、`resolveFilter` | 无 compat / interop |
 | Devtools | `devtools`、`setDevtoolsHook` | 不实现 devtools |
 | 编译器注册 | `registerRuntimeCompiler`、`isRuntimeOnly` | 无内置 compile |
