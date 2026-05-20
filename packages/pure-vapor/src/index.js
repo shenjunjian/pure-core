@@ -57,11 +57,89 @@ export {
 } from '@vue/shared'
 
 // ---------------------------------------------------------------------------
-// B. runtime-core subset — stubs (implemented in src/internal/ later)
+// B. runtime-core subset — internal/
 // ---------------------------------------------------------------------------
 
 export const version = __VERSION__
 
+export {
+  nextTick,
+  queueJob,
+  queuePostFlushCb,
+  flushOnAppMount,
+  SchedulerJobFlags,
+} from './internal/scheduler.js'
+
+export {
+  getCurrentInstance,
+  currentInstance,
+  setCurrentInstance,
+} from './internal/instance.js'
+
+export {
+  onBeforeMount,
+  onMounted,
+  onBeforeUpdate,
+  onUpdated,
+  onBeforeUnmount,
+  onUnmounted,
+  onActivated,
+  onDeactivated,
+  onRenderTracked,
+  onRenderTriggered,
+  onErrorCaptured,
+} from './internal/lifecycle.js'
+
+export {
+  resolveComponent,
+  resolveDirective,
+  resolveDynamicComponent,
+  NULL_DYNAMIC_COMPONENT,
+} from './internal/resolveAssets.js'
+
+export {
+  createAppAPI,
+  createAppContext,
+  normalizeContainer,
+} from './internal/app.js'
+
+export { initFeatureFlags } from './internal/featureFlags.js'
+
+export {
+  callWithErrorHandling,
+  callWithAsyncErrorHandling,
+  handleError,
+  ErrorCodes,
+} from './internal/errorHandling.js'
+
+export {
+  baseNormalizePropsOptions,
+  resolvePropValue,
+  validateProps,
+  baseResolveDefault,
+} from './internal/props.js'
+
+export { baseEmit, defaultPropGetter, isEmitListener } from './internal/emit.js'
+
+export { getInheritedScopeIds } from './internal/scopeId.js'
+
+export {
+  getComponentName,
+  formatComponentName,
+  nextUid,
+  expose,
+  getComponentPublicInstance,
+} from './internal/component.js'
+
+export {
+  warn,
+  pushWarningContext,
+  popWarningContext,
+} from './internal/warning.js'
+
+export { startMeasure, endMeasure } from './internal/profiling.js'
+
+// watch / inject — stubs until apiWatch / apiInject are wired
 export function watch() {
   return NOOP_WATCH
 }
@@ -69,31 +147,12 @@ export function watchEffect() {}
 export function watchPostEffect() {}
 export function watchSyncEffect() {}
 
-export function onBeforeMount() {}
-export function onMounted() {}
-export function onBeforeUpdate() {}
-export function onUpdated() {}
-export function onBeforeUnmount() {}
-export function onUnmounted() {}
-export function onActivated() {}
-export function onDeactivated() {}
-export function onRenderTracked() {}
-export function onRenderTriggered() {}
-export function onErrorCaptured() {}
-
 export function provide() {}
 export function inject() {
   return undefined
 }
 export function hasInjectionContext() {
   return false
-}
-
-export function nextTick(cb) {
-  if (cb) {
-    return Promise.resolve().then(cb)
-  }
-  return Promise.resolve()
 }
 
 export function useAttrs() {
@@ -132,15 +191,6 @@ export function defineModel() {
 export function withDefaults(props, _defaults) {
   return props
 }
-
-export function getCurrentInstance() {
-  return null
-}
-
-export function resolveComponent() {}
-export function resolveDirective() {}
-export function resolveDynamicComponent() {}
-export const NULL_DYNAMIC_COMPONENT = Symbol.for('v-ndc')
 
 export function toHandlers() {
   return {}
