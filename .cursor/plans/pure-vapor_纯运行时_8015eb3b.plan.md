@@ -16,7 +16,7 @@ todos:
     status: completed
   - id: vapor-component
     content: 移植 component 系统、slots、define* API、createVaporApp、fragment、templateRef
-    status: pending
+    status: completed
   - id: vapor-builtin
     content: 移植 Teleport/KeepAlive、vShow/vModel/custom 指令、useVaporCssVars、defineVaporCustomElement（首版不含 Transition/TransitionGroup）
     status: pending

@@ -167,9 +167,7 @@ export function useModel() {
 export function useTemplateRef() {
   return { value: null }
 }
-export function useId() {
-  return ''
-}
+export { useId } from './internal/useId.js'
 export function useCssModule() {
   return {}
 }
@@ -280,54 +278,37 @@ export {
   isDynamicFragment,
 } from './vapor/fragment.js'
 
-export { isVaporComponent } from './vapor/component.js'
+export {
+  isVaporComponent,
+  createComponent,
+  createComponentWithFallback,
+  createAssetComponent,
+  createPlainElement,
+  mountComponent,
+  unmountComponent,
+  getExposed,
+  getRootElement,
+  applyFallthroughProps,
+  getCurrentScopeId,
+  isApplyingFallthroughProps,
+} from './vapor/component.js'
 
-// Stubs until vapor-component / vapor-builtin todos
-export function createVaporApp() {
-  return {
-    mount() {},
-    unmount() {},
-    use() {
-      return this
-    },
-    component() {
-      return this
-    },
-    directive() {
-      return this
-    },
-  }
-}
-export function defineVaporComponent(options) {
-  return options
-}
-export function defineVaporAsyncComponent(source) {
-  return source
-}
+export { createVaporApp } from './vapor/apiCreateApp.js'
+export { defineVaporComponent } from './vapor/apiDefineComponent.js'
+export { defineVaporAsyncComponent } from './vapor/apiDefineAsyncComponent.js'
+export { createDynamicComponent } from './vapor/apiCreateDynamicComponent.js'
+export { createTemplateRefSetter } from './vapor/apiTemplateRef.js'
+export { withAsyncContext } from './vapor/apiSetupHelpers.js'
+export { createSlot, withVaporCtx } from './vapor/componentSlots.js'
+
+// Stubs until vapor-builtin todos
 export function defineVaporCustomElement() {}
 export const VaporElement = function VaporElement() {}
 
 export const VaporTeleport = {}
 export const VaporKeepAlive = {}
 
-export function createComponent() {}
-export function createComponentWithFallback() {}
-export function createAssetComponent() {}
-export function createPlainElement() {}
-
-export function createSlot() {}
-export function withVaporCtx(fn) {
-  return fn()
-}
-
-export function createTemplateRefSetter() {
-  return () => {}
-}
 export function useVaporCssVars() {}
-export function createDynamicComponent() {}
-export function withAsyncContext(fn) {
-  return fn()
-}
 
 export function applyVShow() {}
 export function applyTextModel() {}
@@ -345,9 +326,8 @@ export { flushDomJobs, getPendingDomOpCount } from './internal/domJobQueue.js'
 // Migration aliases (vue → pure-vapor)
 // ---------------------------------------------------------------------------
 
-export {
-  createVaporApp as createApp,
-  defineVaporComponent as defineComponent,
-  defineVaporAsyncComponent as defineAsyncComponent,
-  useVaporCssVars as useCssVars,
-}
+export { createVaporApp as createApp } from './vapor/apiCreateApp.js'
+export { defineVaporComponent as defineComponent } from './vapor/apiDefineComponent.js'
+export { defineVaporAsyncComponent as defineAsyncComponent } from './vapor/apiDefineAsyncComponent.js'
+
+export { SlotFragment } from './vapor/fragment.js'

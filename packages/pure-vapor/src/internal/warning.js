@@ -1,6 +1,6 @@
 import { isRef, setActiveSub, toRaw } from '@vue/reactivity'
 
-import { isFunction, isString } from '@vue/shared'
+import { isFunction, isOn, isModelListener, isString } from '@vue/shared'
 import { ErrorCodes, callWithErrorHandling } from './errorHandling.js'
 import { formatComponentName } from './component.js'
 
@@ -111,6 +111,40 @@ function formatProps(props) {
     res.push(` ...`)
   }
   return res
+}
+
+export function warnExtraneousAttributes(attrs) {
+  const allAttrs = Object.keys(attrs)
+  const eventAttrs = []
+  const extraAttrs = []
+  for (let i = 0, l = allAttrs.length; i < l; i++) {
+    const key = allAttrs[i]
+    if (isOn(key)) {
+      if (!isModelListener(key)) {
+        eventAttrs.push(key[2].toLowerCase() + key.slice(3))
+      }
+    } else {
+      extraAttrs.push(key)
+    }
+  }
+  if (extraAttrs.length) {
+    warn(
+      `Extraneous non-props attributes (` +
+        `${extraAttrs.join(', ')}) ` +
+        `were passed to component but could not be automatically inherited ` +
+        `because component renders fragment or text or teleport root nodes.`,
+    )
+  }
+  if (eventAttrs.length) {
+    warn(
+      `Extraneous non-emits event listeners (` +
+        `${eventAttrs.join(', ')}) ` +
+        `were passed to component but could not be automatically inherited ` +
+        `because component renders fragment or text root nodes. ` +
+        `If the listener is intended to be a component custom event listener only, ` +
+        `declare it using the "emits" option.`,
+    )
+  }
 }
 
 function formatProp(key, value, raw) {

@@ -237,6 +237,14 @@ function flushJobs(seen) {
   }
 }
 
+export function invalidateMount(hooks) {
+  if (hooks) {
+    for (let i = 0; i < hooks.length; i++) {
+      hooks[i].flags |= SchedulerJobFlags.DISPOSED
+    }
+  }
+}
+
 function checkRecursiveUpdates(seen, fn) {
   const count = seen.get(fn) || 0
   if (count > RECURSION_LIMIT) {
