@@ -4,7 +4,8 @@
   "packageManager": "pnpm@10.33.3",
   "type": "module",
   "scripts": {
-    "dev": "node scripts/dev.js",
+    "dev": "node scripts/dev.js --format esm-bundler",
+    "devv": "vp dev packages-private/vapor-e2e-test",
     "build": "node scripts/build.js",
     "build-dts": "node scripts/build-types.js",
     "clean": "rimraf --glob packages/*/dist temp",
