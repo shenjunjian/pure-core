@@ -9,6 +9,7 @@ import { defineVaporComponent } from './apiDefineComponent.js'
 import { createComponent } from './component.js'
 import { renderEffect } from './renderEffect.js'
 import { DynamicFragment } from './fragment.js'
+import { isKeepAliveEnabled } from './keepAlive.js'
 
 export function defineVaporAsyncComponent(source) {
   const {
@@ -79,6 +80,9 @@ export function defineVaporAsyncComponent(source) {
         }
 
         frag.update(render)
+        if (isKeepAliveEnabled && frag.keepAliveCtx) {
+          frag.keepAliveCtx.cacheBlock()
+        }
       })
 
       return frag

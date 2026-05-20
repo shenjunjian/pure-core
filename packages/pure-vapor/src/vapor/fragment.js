@@ -1,5 +1,12 @@
 import { EffectScope, setActiveSub } from '@vue/reactivity'
 import { isArray } from '@vue/shared'
+import {
+  currentKeepAliveCtx,
+  isKeepAliveEnabled,
+  setCurrentKeepAliveCtx,
+  withCurrentCacheKey,
+} from './keepAlive.js'
+import { setBlockKey } from './helpers/setKey.js'
 import { createComment, createTextNode } from './dom/node.js'
 import { insert, remove, isValidBlock } from './block.js'
 import { currentInstance, setCurrentInstance } from '../internal/instance.js'
@@ -12,14 +19,24 @@ export class VaporFragment {
     this.nodes = nodes
     this.renderInstance = currentInstance
     this.slotOwner = currentSlotOwner
+    if (isKeepAliveEnabled) {
+      this.keepAliveCtx = currentKeepAliveCtx
+    }
   }
 
   runWithRenderCtx(fn, scope) {
     const prevInstance = setCurrentInstance(this.renderInstance, scope)
     const prevSlotOwner = setCurrentSlotOwner(this.slotOwner)
+    let prevKeepAliveCtx = null
+    if (isKeepAliveEnabled) {
+      prevKeepAliveCtx = setCurrentKeepAliveCtx(this.keepAliveCtx || null)
+    }
     try {
       return fn()
     } finally {
+      if (isKeepAliveEnabled) {
+        setCurrentKeepAliveCtx(prevKeepAliveCtx)
+      }
       setCurrentSlotOwner(prevSlotOwner)
       setCurrentInstance(...prevInstance)
     }
@@ -66,7 +83,26 @@ export class DynamicFragment extends VaporFragment {
     const parent = this.anchor.parentNode
 
     if (this.scope) {
-      this.scope.stop()
+      if (isKeepAliveEnabled) {
+        let retainScope = false
+        const keepAliveCtx = this.keepAliveCtx
+        if (keepAliveCtx) {
+          const cacheKey = this.keyed
+            ? withCurrentCacheKey(this.current, () =>
+                keepAliveCtx.processShapeFlag(this.nodes),
+              )
+            : keepAliveCtx.processShapeFlag(this.nodes)
+          if (cacheKey !== false) {
+            keepAliveCtx.cacheScope(cacheKey, this.current, this.scope)
+            retainScope = true
+          }
+        }
+        if (!retainScope) {
+          this.scope.stop()
+        }
+      } else {
+        this.scope.stop()
+      }
       if (parent) remove(this.nodes, parent)
     }
 
@@ -82,10 +118,35 @@ export class DynamicFragment extends VaporFragment {
   renderBranch(render, parent, key) {
     this.current = key
     if (render) {
-      this.scope = new EffectScope()
-      this.nodes =
-        this.runWithRenderCtx(() => this.scope.run(render) || [], this.scope) ||
-        []
+      const keepAliveCtx = isKeepAliveEnabled ? this.keepAliveCtx : null
+      const scope = keepAliveCtx && keepAliveCtx.getScope(this.current)
+      if (scope) {
+        this.scope = scope
+      } else {
+        this.scope = new EffectScope()
+      }
+
+      const renderBranch = () => {
+        this.nodes =
+          this.runWithRenderCtx(
+            () => this.scope.run(render) || [],
+            this.scope,
+          ) || []
+        const blockKey = this.keyed ? this.current : this.$key
+        if (blockKey !== undefined && keepAliveCtx) {
+          setBlockKey(this.nodes, blockKey)
+        }
+        if (keepAliveCtx) {
+          keepAliveCtx.processShapeFlag(this.nodes)
+        }
+      }
+
+      if (keepAliveCtx && this.keyed) {
+        withCurrentCacheKey(key, renderBranch)
+      } else {
+        renderBranch()
+      }
+
       if (parent) {
         insert(this.nodes, parent, this.anchor)
       }

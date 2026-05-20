@@ -15,12 +15,20 @@ import {
   isFunction,
   isPromise,
   isString,
+  ShapeFlags,
 } from '@vue/shared'
 import { ErrorCodes, callWithErrorHandling } from '../internal/errorHandling.js'
 import { expose, nextUid, getComponentName } from '../internal/component.js'
 import { getFunctionalFallthrough } from '../internal/functionalFallthrough.js'
 import { warnExtraneousAttributes } from '../internal/warning.js'
 import { isAsyncWrapper } from '../internal/asyncComponent.js'
+import { isKeepAlive } from '../internal/keepAlive.js'
+import {
+  currentKeepAliveCtx,
+  isKeepAliveEnabled,
+  setCurrentKeepAliveCtx,
+} from './keepAlive.js'
+import { isTeleportEnabled, isVaporTeleport } from './teleport.js'
 import { markAsyncBoundary } from '../internal/useId.js'
 import { invalidateMount, queuePostFlushCb } from '../internal/scheduler.js'
 import {
@@ -96,6 +104,25 @@ export function createComponent(
     }
   }
 
+  if (
+    isKeepAliveEnabled &&
+    currentInstance &&
+    currentInstance.vapor &&
+    isKeepAlive(currentInstance)
+  ) {
+    const cached = currentInstance.ctx.getCachedComponent(component)
+    if (cached) return cached
+  }
+
+  if (isTeleportEnabled && isVaporTeleport(component)) {
+    const frag = component.process(rawProps, rawSlots)
+    if (_insertionParent) {
+      onScopeDispose(() => frag.dispose(), true)
+    }
+    if (_insertionParent) insert(frag, _insertionParent, _insertionAnchor)
+    return frag
+  }
+
   const instance = new VaporComponentInstance(
     component,
     rawProps,
@@ -103,6 +130,11 @@ export function createComponent(
     appContext,
     once,
   )
+
+  if (isKeepAliveEnabled && currentKeepAliveCtx && !isAsyncWrapper(instance)) {
+    currentKeepAliveCtx.processShapeFlag(instance)
+    setCurrentKeepAliveCtx(null)
+  }
 
   const prevSlotOwner = setCurrentSlotOwner(null)
   let hasWarningContext = false
@@ -424,6 +456,14 @@ export function createPlainElement(
 }
 
 export function mountComponent(instance, parent, anchor) {
+  if (
+    isKeepAliveEnabled &&
+    instance.shapeFlag & ShapeFlags.COMPONENT_KEPT_ALIVE
+  ) {
+    instance.parent.ctx.activate(instance, parent, anchor)
+    return
+  }
+
   if (__DEV__) {
     startMeasure(instance, `mount`)
   }
@@ -431,6 +471,13 @@ export function mountComponent(instance, parent, anchor) {
   insert(instance.block, parent, anchor)
   setComponentScopeId(instance)
   if (instance.m) queuePostFlushCb(instance.m)
+  if (
+    isKeepAliveEnabled &&
+    instance.shapeFlag & ShapeFlags.COMPONENT_SHOULD_KEEP_ALIVE &&
+    instance.a
+  ) {
+    queuePostFlushCb(instance.a)
+  }
   instance.isMounted = true
   if (__DEV__) {
     endMeasure(instance, `mount`)
@@ -438,6 +485,19 @@ export function mountComponent(instance, parent, anchor) {
 }
 
 export function unmountComponent(instance, parentNode) {
+  if (
+    isKeepAliveEnabled &&
+    instance.shapeFlag & ShapeFlags.COMPONENT_SHOULD_KEEP_ALIVE &&
+    instance.parent &&
+    instance.parent.vapor &&
+    instance.parent.ctx
+  ) {
+    if (parentNode) {
+      instance.parent.ctx.deactivate(instance)
+    }
+    return
+  }
+
   if (instance.isMounted && !instance.isUnmounted) {
     invalidateMount(instance.m)
     invalidateMount(instance.a)

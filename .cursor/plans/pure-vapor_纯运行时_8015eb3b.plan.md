@@ -19,7 +19,7 @@ todos:
     status: completed
   - id: vapor-builtin
     content: 移植 Teleport/KeepAlive、vShow/vModel/custom 指令、useVaporCssVars、defineVaporCustomElement（首版不含 Transition/TransitionGroup）
-    status: pending
+    status: completed
   - id: exports-index
     content: 完善 src/index.js：对齐 index-with-vapor 公开面（reactivity/shared 再导出 + runtime-core 子集 + runtime-vapor 全量）；按排除表剔除无用符号
     status: pending

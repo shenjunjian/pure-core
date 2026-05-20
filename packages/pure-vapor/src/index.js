@@ -301,22 +301,22 @@ export { createTemplateRefSetter } from './vapor/apiTemplateRef.js'
 export { withAsyncContext } from './vapor/apiSetupHelpers.js'
 export { createSlot, withVaporCtx } from './vapor/componentSlots.js'
 
-// Stubs until vapor-builtin todos
-export function defineVaporCustomElement() {}
-export const VaporElement = function VaporElement() {}
-
-export const VaporTeleport = {}
-export const VaporKeepAlive = {}
-
-export function useVaporCssVars() {}
-
-export function applyVShow() {}
-export function applyTextModel() {}
-export function applyRadioModel() {}
-export function applyCheckboxModel() {}
-export function applySelectModel() {}
-export function applyDynamicModel() {}
-export function withVaporDirectives() {}
+export {
+  defineVaporCustomElement,
+  VaporElement,
+} from './vapor/apiDefineCustomElement.js'
+export { VaporTeleport } from './vapor/components/Teleport.js'
+export { VaporKeepAlive } from './vapor/components/KeepAlive.js'
+export { useVaporCssVars } from './vapor/helpers/useCssVars.js'
+export { applyVShow } from './vapor/directives/vShow.js'
+export {
+  applyTextModel,
+  applyRadioModel,
+  applyCheckboxModel,
+  applySelectModel,
+  applyDynamicModel,
+} from './vapor/directives/vModel.js'
+export { withVaporDirectives } from './vapor/directives/custom.js'
 
 export { withModifiers, withKeys } from './internal/eventModifiers.js'
 
@@ -329,5 +329,6 @@ export { flushDomJobs, getPendingDomOpCount } from './internal/domJobQueue.js'
 export { createVaporApp as createApp } from './vapor/apiCreateApp.js'
 export { defineVaporComponent as defineComponent } from './vapor/apiDefineComponent.js'
 export { defineVaporAsyncComponent as defineAsyncComponent } from './vapor/apiDefineAsyncComponent.js'
+export { useVaporCssVars as useCssVars } from './vapor/helpers/useCssVars.js'
 
 export { SlotFragment } from './vapor/fragment.js'

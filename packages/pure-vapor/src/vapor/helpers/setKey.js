@@ -1,4 +1,6 @@
 import { isArray } from '@vue/shared'
+import { isKeepAlive } from '../../internal/keepAlive.js'
+import { isKeepAliveEnabled } from '../keepAlive.js'
 import { isVaporComponent } from '../component.js'
 
 export function setBlockKey(block, key) {
@@ -8,7 +10,7 @@ export function setBlockKey(block, key) {
     block.$key = key
   } else if (isVaporComponent(block)) {
     block.$key = key
-    if (block.block) {
+    if ((!isKeepAliveEnabled || !isKeepAlive(block)) && block.block) {
       setBlockKey(block.block, key)
     }
   } else if (isArray(block)) {
