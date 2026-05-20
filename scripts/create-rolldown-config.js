@@ -166,7 +166,7 @@ export function createConfigsForPackage({
       output.name = packageOptions.name
     }
 
-    let entryFile = 'index.ts'
+    let entryFile = packageOptions.entry || 'index.ts'
     if (pkg.name === 'vue') {
       if (format === 'esm-browser-vapor' || format === 'esm-bundler-runtime') {
         entryFile = 'runtime-with-vapor.ts'

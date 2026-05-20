@@ -1,0 +1,44 @@
+{
+  "name": "pure-vapor",
+  "version": "3.6.0-beta.12",
+  "description": "Pure JavaScript Vapor runtime with only @vue/shared and @vue/reactivity",
+  "main": "index.js",
+  "module": "dist/pure-vapor.esm-bundler.js",
+  "files": [
+    "index.js",
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "default": "./dist/pure-vapor.esm-bundler.js"
+    },
+    "./*": "./*"
+  },
+  "sideEffects": false,
+  "buildOptions": {
+    "name": "PureVapor",
+    "formats": [
+      "esm-bundler"
+    ],
+    "entry": "index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vuejs/core.git",
+    "directory": "packages/pure-vapor"
+  },
+  "keywords": [
+    "vue",
+    "vapor"
+  ],
+  "author": "Evan You",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/vuejs/core/issues"
+  },
+  "homepage": "https://github.com/vuejs/core/tree/dev/packages/pure-vapor#readme",
+  "dependencies": {
+    "@vue/shared": "workspace:*",
+    "@vue/reactivity": "workspace:*"
+  }
+}

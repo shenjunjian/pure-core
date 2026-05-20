@@ -67,7 +67,8 @@ for (const target of targets) {
   )
   const relativeOutfile = relative(process.cwd(), outfile)
 
-  let entryFile = 'index.ts'
+  const packageOptions = pkg.buildOptions || {}
+  let entryFile = packageOptions.entry || 'index.ts'
   if (pkg.name === 'vue') {
     if (format === 'esm-browser-vapor' || format === 'esm-bundler-runtime') {
       entryFile = 'runtime-with-vapor.ts'
