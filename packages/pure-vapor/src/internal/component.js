@@ -1,5 +1,5 @@
-import { isArray, isRef, markRaw, proxyRefs } from '@vue/reactivity'
-import { isFunction } from '@vue/shared'
+import { isRef, markRaw, proxyRefs } from '@vue/reactivity'
+import { isFunction, isArray } from '@vue/shared'
 import { warn } from './warning.js'
 
 let uid = 0

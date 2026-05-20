@@ -1,10 +1,6 @@
-import {
-  isFunction,
-  isRef,
-  isString,
-  setActiveSub,
-  toRaw,
-} from '@vue/reactivity'
+import { isRef, setActiveSub, toRaw } from '@vue/reactivity'
+
+import { isFunction, isString } from '@vue/shared'
 import { ErrorCodes, callWithErrorHandling } from './errorHandling.js'
 import { formatComponentName } from './component.js'
 
