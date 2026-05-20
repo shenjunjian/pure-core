@@ -7,7 +7,7 @@ todos:
     status: completed
   - id: internal-core
     content: 实现 src/internal/：scheduler、instance、errorHandling、app、resolveAssets、props、emit、scopeId（不含 transition 运行时）
-    status: pending
+    status: completed
   - id: dom-job-queue
     content: 实现 DOM 批量调度（jobDomOperatorList、domOps 门面、rAF flush、播放后 nextTick）；作为 pure-vapor 核心差异化能力
     status: pending
