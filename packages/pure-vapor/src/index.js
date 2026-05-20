@@ -62,19 +62,14 @@ export {
 
 export const version = __VERSION__
 
-export {
-  nextTick,
-  queueJob,
-  queuePostFlushCb,
-  flushOnAppMount,
-  SchedulerJobFlags,
-} from './internal/scheduler.js'
+export { nextTick } from './internal/scheduler.js'
 
 export {
-  getCurrentInstance,
-  currentInstance,
-  setCurrentInstance,
-} from './internal/instance.js'
+  watch,
+  watchEffect,
+  watchPostEffect,
+  watchSyncEffect,
+} from './internal/apiWatch.js'
 
 export {
   onBeforeMount,
@@ -90,6 +85,28 @@ export {
   onErrorCaptured,
 } from './internal/lifecycle.js'
 
+export { provide, inject, hasInjectionContext } from './internal/apiInject.js'
+
+export {
+  useAttrs,
+  useSlots,
+  defineProps,
+  defineEmits,
+  defineExpose,
+  defineOptions,
+  defineSlots,
+  defineModel,
+  withDefaults,
+  toHandlers,
+} from './internal/apiSetupHelpers.js'
+
+export { useModel } from './internal/useModel.js'
+export { useTemplateRef } from './internal/useTemplateRef.js'
+export { useId } from './internal/useId.js'
+export { useCssModule } from './internal/useCssModule.js'
+
+export { getCurrentInstance } from './internal/instance.js'
+
 export {
   resolveComponent,
   resolveDirective,
@@ -97,151 +114,54 @@ export {
   NULL_DYNAMIC_COMPONENT,
 } from './internal/resolveAssets.js'
 
-export {
-  createAppAPI,
-  createAppContext,
-  normalizeContainer,
-} from './internal/app.js'
-
-export { initFeatureFlags } from './internal/featureFlags.js'
-
-export {
-  callWithErrorHandling,
-  callWithAsyncErrorHandling,
-  handleError,
-  ErrorCodes,
-} from './internal/errorHandling.js'
-
-export {
-  baseNormalizePropsOptions,
-  resolvePropValue,
-  validateProps,
-  baseResolveDefault,
-} from './internal/props.js'
-
-export { baseEmit, defaultPropGetter, isEmitListener } from './internal/emit.js'
-
-export { getInheritedScopeIds } from './internal/scopeId.js'
-
-export {
-  getComponentName,
-  formatComponentName,
-  nextUid,
-  expose,
-  getComponentPublicInstance,
-} from './internal/component.js'
-
-export {
-  warn,
-  pushWarningContext,
-  popWarningContext,
-} from './internal/warning.js'
-
-export { startMeasure, endMeasure } from './internal/profiling.js'
-
-// watch / inject — stubs until apiWatch / apiInject are wired
-export function watch() {
-  return NOOP_WATCH
-}
-export function watchEffect() {}
-export function watchPostEffect() {}
-export function watchSyncEffect() {}
-
-export function provide() {}
-export function inject() {
-  return undefined
-}
-export function hasInjectionContext() {
-  return false
-}
-
-export function useAttrs() {
-  return {}
-}
-export function useSlots() {
-  return {}
-}
-export function useModel() {
-  return []
-}
-export function useTemplateRef() {
-  return { value: null }
-}
-export { useId } from './internal/useId.js'
-export function useCssModule() {
-  return {}
-}
-
-export function defineProps() {
-  return {}
-}
-export function defineEmits() {
-  return () => {}
-}
-export function defineExpose() {}
-export function defineOptions() {}
-export function defineSlots() {
-  return {}
-}
-export function defineModel() {
-  return { value: undefined }
-}
-export function withDefaults(props, _defaults) {
-  return props
-}
-
-export function toHandlers() {
-  return {}
-}
-
-const NOOP_WATCH = () => {}
+export { withModifiers, withKeys } from './internal/eventModifiers.js'
 
 // ---------------------------------------------------------------------------
-// C. @vue/runtime-vapor — DOM / block / control flow (vapor-component todo: rest)
+// C. @vue/runtime-vapor — vapor runtime (minus exclusion table)
 // ---------------------------------------------------------------------------
 
+export { createVaporApp } from './vapor/apiCreateApp.js'
+export { defineVaporComponent } from './vapor/apiDefineComponent.js'
+export { defineVaporAsyncComponent } from './vapor/apiDefineAsyncComponent.js'
 export {
-  insert,
-  prepend,
-  remove,
-  isBlock,
-  isValidBlock,
-} from './vapor/block.js'
+  defineVaporCustomElement,
+  VaporElement,
+} from './vapor/apiDefineCustomElement.js'
+
+export { VaporTeleport } from './vapor/components/Teleport.js'
+export { VaporKeepAlive } from './vapor/components/KeepAlive.js'
+
+export { insert, prepend, remove } from './vapor/block.js'
+export { setInsertionState } from './vapor/insertionState.js'
+
 export {
-  setInsertionState,
-  resetInsertionState,
-} from './vapor/insertionState.js'
-export { renderEffect, RenderEffect } from './vapor/renderEffect.js'
+  createComponent,
+  createComponentWithFallback,
+  createAssetComponent,
+  createPlainElement,
+  isVaporComponent,
+} from './vapor/component.js'
+
+export { renderEffect } from './vapor/renderEffect.js'
+export { createSlot, withVaporCtx } from './vapor/componentSlots.js'
 
 export { template } from './vapor/dom/template.js'
-export {
-  createElement,
-  createTextNode,
-  createComment,
-  querySelector,
-  parentNode,
-  child,
-  nthChild,
-  next,
-  txt,
-} from './vapor/dom/node.js'
+export { createTextNode, child, nthChild, next, txt } from './vapor/dom/node.js'
 
 export {
-  setProp,
-  setAttr,
-  setDOMProp,
-  setClass,
-  setClassName,
-  setStyle,
-  setValue,
   setText,
-  setElementText,
   setBlockText,
   setHtml,
   setBlockHtml,
+  setClass,
+  setClassName,
+  setStyle,
+  setAttr,
+  setValue,
+  setProp,
+  setDOMProp,
   setDynamicProps,
-  setDynamicProp,
-  optimizePropertyLookup,
+  setElementText,
 } from './vapor/dom/prop.js'
 
 export {
@@ -255,59 +175,22 @@ export {
   withVaporKeys,
 } from './vapor/dom/event.js'
 
-export { runWithDomOps, runWithDomOpsSync } from './vapor/dom/domOps.js'
-
 export { createIf } from './vapor/apiCreateIf.js'
+export { createKeyedFragment } from './vapor/apiCreateFragment.js'
 export {
   createFor,
   createForSlots,
   createSelector,
   getRestElement,
   getDefaultValue,
-  isForBlock,
 } from './vapor/apiCreateFor.js'
-export { createKeyedFragment } from './vapor/apiCreateFragment.js'
-export { setBlockKey } from './vapor/helpers/setKey.js'
 
-export {
-  VaporFragment,
-  DynamicFragment,
-  ForFragment,
-  ForBlock,
-  isFragment,
-  isDynamicFragment,
-} from './vapor/fragment.js'
-
-export {
-  isVaporComponent,
-  createComponent,
-  createComponentWithFallback,
-  createAssetComponent,
-  createPlainElement,
-  mountComponent,
-  unmountComponent,
-  getExposed,
-  getRootElement,
-  applyFallthroughProps,
-  getCurrentScopeId,
-  isApplyingFallthroughProps,
-} from './vapor/component.js'
-
-export { createVaporApp } from './vapor/apiCreateApp.js'
-export { defineVaporComponent } from './vapor/apiDefineComponent.js'
-export { defineVaporAsyncComponent } from './vapor/apiDefineAsyncComponent.js'
-export { createDynamicComponent } from './vapor/apiCreateDynamicComponent.js'
 export { createTemplateRefSetter } from './vapor/apiTemplateRef.js'
-export { withAsyncContext } from './vapor/apiSetupHelpers.js'
-export { createSlot, withVaporCtx } from './vapor/componentSlots.js'
-
-export {
-  defineVaporCustomElement,
-  VaporElement,
-} from './vapor/apiDefineCustomElement.js'
-export { VaporTeleport } from './vapor/components/Teleport.js'
-export { VaporKeepAlive } from './vapor/components/KeepAlive.js'
 export { useVaporCssVars } from './vapor/helpers/useCssVars.js'
+export { setBlockKey } from './vapor/helpers/setKey.js'
+export { createDynamicComponent } from './vapor/apiCreateDynamicComponent.js'
+export { withAsyncContext } from './vapor/apiSetupHelpers.js'
+
 export { applyVShow } from './vapor/directives/vShow.js'
 export {
   applyTextModel,
@@ -318,9 +201,7 @@ export {
 } from './vapor/directives/vModel.js'
 export { withVaporDirectives } from './vapor/directives/custom.js'
 
-export { withModifiers, withKeys } from './internal/eventModifiers.js'
-
-export { flushDomJobs, getPendingDomOpCount } from './internal/domJobQueue.js'
+export { isFragment, VaporFragment, DynamicFragment } from './vapor/fragment.js'
 
 // ---------------------------------------------------------------------------
 // Migration aliases (vue → pure-vapor)
@@ -330,5 +211,3 @@ export { createVaporApp as createApp } from './vapor/apiCreateApp.js'
 export { defineVaporComponent as defineComponent } from './vapor/apiDefineComponent.js'
 export { defineVaporAsyncComponent as defineAsyncComponent } from './vapor/apiDefineAsyncComponent.js'
 export { useVaporCssVars as useCssVars } from './vapor/helpers/useCssVars.js'
-
-export { SlotFragment } from './vapor/fragment.js'

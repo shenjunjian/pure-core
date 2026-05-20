@@ -22,7 +22,7 @@ todos:
     status: completed
   - id: exports-index
     content: 完善 src/index.js：对齐 index-with-vapor 公开面（reactivity/shared 再导出 + runtime-core 子集 + runtime-vapor 全量）；按排除表剔除无用符号
-    status: pending
+    status: completed
   - id: tests-docs
     content: 添加 __tests__（compiler-vapor 快照 + 移植 runtime-vapor 关键用例）；README 说明 runtimeModuleName 与 Suspense/Transition 限制
     status: pending
