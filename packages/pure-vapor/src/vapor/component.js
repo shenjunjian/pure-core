@@ -485,6 +485,9 @@ export function mountComponent(instance, parent, anchor) {
 }
 
 export function unmountComponent(instance, parentNode) {
+  if (!instance) {
+    return
+  }
   if (
     isKeepAliveEnabled &&
     instance.shapeFlag & ShapeFlags.COMPONENT_SHOULD_KEEP_ALIVE &&

@@ -75,5 +75,9 @@
     "@vue/reactivity": "workspace:*",
     "@vue/compiler-sfc": "workspace:*",
     "@vue/server-renderer": "workspace:*"
+  },
+  "devDependencies": {
+    "@vue/compiler-dom": "workspace:*",
+    "@vue/compiler-vapor": "workspace:*"
   }
 }

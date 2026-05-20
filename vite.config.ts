@@ -73,7 +73,7 @@ export default defineConfig({
             'packages/server-renderer/__tests__/ssrWatch.spec.ts',
             '**/e2e/**',
             '**/vapor-e2e-test/**',
-            'packages/{vue,vue-compat,runtime-dom,runtime-vapor}/**',
+            'packages/{vue,vue-compat,runtime-dom,runtime-vapor,pure-vapor}/**',
           ],
         },
       },
@@ -83,7 +83,7 @@ export default defineConfig({
           name: 'unit-jsdom',
           environment: 'jsdom',
           include: [
-            'packages/{vue,vue-compat,runtime-dom,runtime-vapor}/**/*.spec.ts',
+            'packages/{vue,vue-compat,runtime-dom,runtime-vapor,pure-vapor}/**/*.spec.{ts,js}',
           ],
           exclude: [...configDefaults.exclude, '**/e2e/**'],
         },

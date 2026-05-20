@@ -142,6 +142,7 @@ export function createAppAPI(mount, unmount, getPublicInstance) {
           }
           const instance = mount(app, rootContainer, isHydrate, namespace)
 
+          app._instance = instance
           isMounted = true
           app._container = rootContainer
           rootContainer.__vue_app__ = app
@@ -175,8 +176,11 @@ export function createAppAPI(mount, unmount, getPublicInstance) {
             ErrorCodes.APP_UNMOUNT_CLEANUP,
           )
           unmount(app)
+          app._instance = null
+          isMounted = false
           if (app._container) {
             delete app._container.__vue_app__
+            app._container = null
           }
         } else if (__DEV__) {
           warn(`Cannot unmount an app that is not mounted.`)

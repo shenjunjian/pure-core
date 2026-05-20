@@ -20,7 +20,7 @@ compileTemplate: {
 }
 ```
 
-或在 Vite 中 alias：
+或在 Vite 中 alias（需同时保证模板编译也指向 `pure-vapor` 的 helper import）：
 
 ```js
 resolve: {
@@ -41,18 +41,37 @@ resolve: {
 
 ## 首版不支持
 
-- SSR（`createVaporSSRApp` 等）
-- VDOM 互操作（`vaporInteropPlugin`）
-- Devtools
-- `Suspense`
-- `VaporTransition` / `VaporTransitionGroup`
+以下能力在完整 `vue` / `index-with-vapor` 链路中存在，但 **pure-vapor 不实现、不导出**：
 
-使用 `<Suspense>` 或 `<transition>` 的模板仍可被编译器生成 import，但本包不导出对应符号，需在应用层避免或等待后续版本。
+| 类别 | 不导出示例 |
+|------|-----------|
+| 运行时编译 | `compile` |
+| VDOM | `h`、`createVNode`、`Fragment`、`openBlock`、… |
+| VDOM App | `createSSRApp`、`hydrate`（`createApp` 为 `createVaporApp` 的别名） |
+| SSR | `createVaporSSRApp`、`useSSRContext`、… |
+| VDOM 内置 | `Teleport`、`KeepAlive`、`Suspense`、`Transition` |
+| Vapor 剔除 | `VaporTransition`、`VaporTransitionGroup`、`vaporInteropPlugin` |
+| Devtools / compat | `devtools`、`compatUtils`、… |
 
-## 开发
+使用 `<Suspense>`、`<transition>` 或 `<Transition>` 的模板仍可被 `compiler-vapor` 生成对应 import，但本包不导出这些符号，应用层需避免或等待后续版本。
+
+## 测试
 
 ```bash
 pnpm i
 vp run build pure-vapor
 vp run test pure-vapor
 ```
+
+`packages/pure-vapor/__tests__/` 覆盖：
+
+- **DOM 队列**：`domJobQueue.spec.js`（入队顺序、rAF 合并、`nextTick` 在 DOM 播放之后）
+- **编译器冒烟**：`compileSmoke.spec.js`（`runtimeModuleName: 'pure-vapor'` 快照 + `new Function` 挂载）
+- **导出契约**：`exports.spec.js`（必需符号存在、排除表符号不存在）
+- **移植用例**：`block` / `if` / `for` / `apiCreateVaporApp` / `renderEffect` / `internal`（源自 `runtime-vapor`，跳过 Transition / Suspense / interop / hydration）
+
+需要断言 DOM 时，在 microtask 之后调用 `flushDomJobs()`（测试辅助见 `__tests__/_utils.js` 的 `flushAll()`）。
+
+## 开发
+
+与测试命令相同；完整 monorepo 校验见根目录 `AGENTS.md`。
