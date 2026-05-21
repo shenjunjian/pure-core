@@ -7,7 +7,7 @@ todos:
     status: completed
   - id: inline-create-app
     content: 内联 createVaporApp：删除 createAppAPI 注入、_createApp、收窄 mount 签名
-    status: pending
+    status: completed
   - id: strip-legacy
     content: 清理 SSR setup、setupContext、死 scope/hydration 业务分支
     status: pending
