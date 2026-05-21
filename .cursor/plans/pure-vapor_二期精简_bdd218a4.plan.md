@@ -4,7 +4,7 @@ overview: 在 pure-vapor 初版落地基础上，分四条线推进：内联 Vap
 todos:
   - id: baseline-tests
     content: 新增 multi-app.spec.js + flushApp/flushAllApps 测试工具；补最小 exports/快照冒烟
-    status: pending
+    status: completed
   - id: inline-create-app
     content: 内联 createVaporApp：删除 createAppAPI 注入、_createApp、收窄 mount 签名
     status: pending

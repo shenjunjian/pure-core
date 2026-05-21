@@ -70,4 +70,15 @@ describe('pure-vapor public exports', () => {
   test('createApp is a migration alias for createVaporApp', () => {
     expect(pureVapor.createApp).toBe(pureVapor.createVaporApp)
   })
+
+  test('version is exported', () => {
+    expect(typeof pureVapor.version).toBe('string')
+    expect(pureVapor.version.length).toBeGreaterThan(0)
+  })
+
+  test('reactivity and shared helpers are re-exported', () => {
+    expect(pureVapor.effect).toBeTypeOf('function')
+    expect(pureVapor.camelize('foo-bar')).toBe('fooBar')
+    expect(pureVapor.toDisplayString(1)).toBe('1')
+  })
 })

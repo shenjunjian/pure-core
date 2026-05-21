@@ -60,4 +60,34 @@ describe('compiler-vapor → pure-vapor', () => {
     await flushAll()
     expect(root.textContent).toBe('world')
   })
+
+  test('smoke mount compiled v-for render', async () => {
+    const render = compileToPureVaporRender(
+      `<ul><li v-for="n in items">{{ n }}</li></ul>`,
+      {
+        bindingMetadata: {
+          items: BindingTypes.SETUP_REF,
+        },
+      },
+    )
+
+    const items = ref([1, 2])
+
+    const Comp = {
+      __vapor: true,
+      setup() {
+        return { items }
+      },
+      render,
+    }
+
+    const root = document.createElement('div')
+    createVaporApp(Comp).mount(root)
+    await flushAll()
+    expect(root.textContent).toBe('12')
+
+    items.value = [3, 4, 5]
+    await flushAll()
+    expect(root.textContent).toBe('345')
+  })
 })

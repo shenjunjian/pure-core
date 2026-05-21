@@ -8,10 +8,14 @@ import { createVaporApp } from '../src/index.js'
 
 export { pureVapor }
 
-export async function flushAll() {
+export async function flushAllApps() {
   await Promise.resolve()
   flushDomJobs()
 }
+
+export const flushAll = flushAllApps
+
+// flushApp(app) will be added when scheduler/dom queues live on app._Internal.
 
 export function makeRender(
   initHost = () => {
