@@ -23,25 +23,13 @@ import {
   callWithAsyncErrorHandling,
 } from '../internal/errorHandling.js'
 import { flushOnAppMount } from '../internal/scheduler.js'
-import { initFeatureFlags } from '../internal/featureFlags.js'
 import { warn } from '../internal/warning.js'
 import { optimizePropertyLookup } from './dom/prop.js'
 import { runWithDomOps } from './dom/domOps.js'
 
 let uid = 0
 
-function prepareApp() {
-  if (__ESM_BUNDLER__ && !__TEST__) {
-    initFeatureFlags()
-  }
-
-  const target = getGlobalThis()
-  target.__VUE__ = true
-}
-
 export function createVaporApp(rootComponent, rootProps = null) {
-  prepareApp()
-
   if (!isFunction(rootComponent)) {
     rootComponent = extend({}, rootComponent)
   }

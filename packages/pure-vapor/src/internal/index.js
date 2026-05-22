@@ -11,7 +11,6 @@ export * from './scopeId.js'
 export * from './component.js'
 export * from './warning.js'
 export * from './profiling.js'
-export * from './featureFlags.js'
 export { SchedulerJobFlags } from './scheduler.js'
 export {
   DomOpType,

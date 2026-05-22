@@ -287,6 +287,7 @@ flowchart TB
 | Options API / mixins | `app.mixin()`、`__FEATURE_OPTIONS_API__`、app 级 `mixins` / `optionMergeStrategies` / `optionsCache` | Vapor 仅 setup；与 upstream `runtime-vapor` 相同，不做 mixin 合并 |
 | 互操作 / 兼容 | `vdomInterop*`、`compatUtils`、`DeprecationTypes`、`resolveFilter` | 无 compat / interop |
 | Devtools | `devtools`、`setDevtoolsHook` | 不实现 devtools |
+| Feature flags | `initFeatureFlags`、`internal/featureFlags.js` | 不实现 devtools / SSR / hydration；无需 `__FEATURE_PROD_DEVTOOLS__`、`__FEATURE_PROD_HYDRATION_MISMATCH_DETAILS__` 等编译期注入与全局默认值；`createVaporApp` 的 `prepareApp` 不调用 `initFeatureFlags` |
 | 编译器注册 | `registerRuntimeCompiler`、`isRuntimeOnly` | 无内置 compile |
 | Transition 运行时钩子 | `useTransitionState`、`resolveTransitionHooks`、`setTransitionHooks`、`getTransitionRawChildren` | 随 Transition 剔除 |
 | 自定义渲染器 | `createRenderer`、`MoveType`、`transformVNodeArgs` | Vapor 非可插拔 renderer API |
@@ -343,6 +344,7 @@ packages/pure-vapor/
 │   │   ├── props.js          # normalizePropsOptions, 校验（精简版）
 │   │   ├── emit.js           # baseEmit
 │   │   └── scopeId.js
+│   │   # 无 featureFlags.js（不兼容 devtools / SSR / hydration，见「剔除」表）
 │   └── vapor/            # 自 runtime-vapor 移植（文件名对应）
 │       ├── block.js
 │       ├── component.js
@@ -388,7 +390,7 @@ packages/pure-vapor/
 | 实例 | `component.js`, `componentProps.js`, `componentEmits.js`, `componentSlots.js` |
 | API | `apiDefineComponent.js`, `apiDefineAsyncComponent.js`, `apiCreateDynamicComponent.js`, `apiSetupHelpers.js`, `apiTemplateRef.js` |
 | Fragment | `fragment.js` |
-| App | `apiCreateApp.js`（仅 `createVaporApp`；`mount` 包在 `runWithDomOps`；删除 devtools 分支） |
+| App | `apiCreateApp.js`（仅 `createVaporApp`；`mount` 包在 `runWithDomOps`；删除 devtools 分支；**不**移植 `initFeatureFlags` / `featureFlags.js`） |
 | 组件生命周期 | `mountComponent` / `unmountComponent` | 挂载/卸载 DOM 变更经 `domOps` |
 
 **不移植**：`hmr.js`（可选：若需 dev HMR 可二期；用户未要求且利于体积）、`refCleanup.js` 按需保留。
