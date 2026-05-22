@@ -428,6 +428,13 @@ importers:
       '@vue/shared':
         specifier: workspace:*
         version: link:../shared
+    devDependencies:
+      '@vue/compiler-dom':
+        specifier: workspace:*
+        version: link:../compiler-dom
+      '@vue/compiler-vapor':
+        specifier: workspace:*
+        version: link:../compiler-vapor
 
   packages/reactivity:
     dependencies:
