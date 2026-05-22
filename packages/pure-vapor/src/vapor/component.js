@@ -69,6 +69,8 @@ import {
   resetInsertionState,
 } from './insertionState.js'
 import { setComponentScopeId, setScopeId } from './scopeId.js'
+import { registerHMR, unregisterHMR } from '../internal/hmr.js'
+import { hmrReload, hmrRerender } from './hmr.js'
 
 export let isApplyingFallthroughProps = false
 
@@ -141,7 +143,10 @@ export function createComponent(
   let hasInitMeasure = false
   try {
     if (__DEV__) {
+      registerHMR(instance)
       instance.isSingleRoot = isSingleRoot
+      instance.hmrRerender = hmrRerender.bind(null, instance)
+      instance.hmrReload = hmrReload.bind(null, instance)
       pushWarningContext(instance)
       hasWarningContext = true
       startMeasure(instance, `init`)
@@ -502,6 +507,9 @@ export function unmountComponent(instance, parentNode) {
   }
 
   if (instance.isMounted && !instance.isUnmounted) {
+    if (__DEV__) {
+      unregisterHMR(instance)
+    }
     invalidateMount(instance.m)
     invalidateMount(instance.a)
     if (instance.bum) {

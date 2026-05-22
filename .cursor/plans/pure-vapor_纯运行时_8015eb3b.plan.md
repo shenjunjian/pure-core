@@ -23,6 +23,9 @@ todos:
   - id: exports-index
     content: 完善 src/index.js：对齐 index-with-vapor 公开面（reactivity/shared 再导出 + runtime-core 子集 + runtime-vapor 全量）；按排除表剔除无用符号
     status: completed
+  - id: dev-hmr
+    content: dev-only HMR：`internal/hmr.js` 初始化 `__VUE_HMR_RUNTIME__`；`vapor/hmr.js` + `component.js` 的 registerHMR / hmrRerender / hmrReload；`createVaporApp` 挂载时设置 `appContext.reload`
+    status: completed
   - id: tests-docs
     content: 添加 __tests__（compiler-vapor 快照 + 移植 runtime-vapor 关键用例）；README 说明 runtimeModuleName 与 Suspense/Transition 限制
     status: pending
@@ -343,11 +346,13 @@ packages/pure-vapor/
 │   │   ├── resolveAssets.js
 │   │   ├── props.js          # normalizePropsOptions, 校验（精简版）
 │   │   ├── emit.js           # baseEmit
-│   │   └── scopeId.js
+│   │   ├── scopeId.js
+│   │   ├── hmr.js            # __DEV__：__VUE_HMR_RUNTIME__ 全局初始化
 │   │   # 无 featureFlags.js（不兼容 devtools / SSR / hydration，见「剔除」表）
 │   └── vapor/            # 自 runtime-vapor 移植（文件名对应）
 │       ├── block.js
 │       ├── component.js
+│       ├── hmr.js            # __DEV__：hmrRerender / hmrReload（供 internal/hmr 调用）
 │       ├── renderEffect.js
 │       ├── dom/
 │       │   └── domOps.js     # DOM 写入门面，全部 queueDomOp
@@ -393,7 +398,7 @@ packages/pure-vapor/
 | App | `apiCreateApp.js`（仅 `createVaporApp`；`mount` 包在 `runWithDomOps`；删除 devtools 分支；**不**移植 `initFeatureFlags` / `featureFlags.js`） |
 | 组件生命周期 | `mountComponent` / `unmountComponent` | 挂载/卸载 DOM 变更经 `domOps` |
 
-**不移植**：`hmr.js`（可选：若需 dev HMR 可二期；用户未要求且利于体积）、`refCleanup.js` 按需保留。
+**已移植（dev-only）**：`internal/hmr.js`（全局 `__VUE_HMR_RUNTIME__`）、`vapor/hmr.js`（`hmrRerender` / `hmrReload`）；`component.js` 在 `__DEV__` 下 `registerHMR` / `unregisterHMR`；`apiCreateApp` 挂载根组件时设置 `appContext.reload`。生产构建中 `__DEV__` 为 false，全局初始化与实例注册代码可被摇树优化掉。
 
 ### 阶段 D：内置组件与指令（全量对齐所需）
 
@@ -457,6 +462,46 @@ resolve: { alias: { vue: 'pure-vapor' } }
 | `__DEV__` / feature flags | 构建时沿用 monorepo 的 `__DEV__` 替换；去掉 devtools / prod devtools 分支 |
 | rAF 延迟导致同步读 DOM 失效 | 文档说明；`nextTick` 绑定 DOM flush；必要时提供 `runWithDomOpsSync` 逃生舱 |
 | 操作顺序与 `runtime-vapor` 不一致 | 入队顺序严格按原 `insert`/`remove` 调用顺序播放；单测对比挂载结果 HTML（不含 Transition 场景） |
+
+## Dev HMR（`@vitejs/plugin-vue` 兼容）
+
+### 背景
+
+`@vitejs/plugin-vue` 在开发模式会为 SFC 注入：
+
+- `_sfc_main.__hmrId`
+- `typeof __VUE_HMR_RUNTIME__ !== 'undefined' && __VUE_HMR_RUNTIME__.createRecord(...)`
+- 仅模板变更时的 `export const _rerender_only = __VUE_HMR_RUNTIME__.CHANGED_FILE === "<file>"`
+- `import.meta.hot.accept` 内调用 `__VUE_HMR_RUNTIME__.rerender` / `reload`
+
+完整 `vue` 包通过 `runtime-core/src/hmr.ts` 在 `__DEV__` 下设置 `getGlobalThis().__VUE_HMR_RUNTIME__`。`pure-vapor` 无 `runtime-core` 依赖，需在包内自实现等价能力。
+
+### 实现落点
+
+| 模块 | 职责 |
+|------|------|
+| [`src/internal/hmr.js`](packages/pure-vapor/src/internal/hmr.js) | 维护 `id → { initialDef, instances }` 映射；`registerHMR` / `unregisterHMR`；`__DEV__` 时挂载全局 runtime |
+| [`src/vapor/hmr.js`](packages/pure-vapor/src/vapor/hmr.js) | Vapor 实例级 `hmrRerender`（scope reset + devRender + block 重插）与 `hmrReload`（unmount + createComponent + mount） |
+| [`src/vapor/component.js`](packages/pure-vapor/src/vapor/component.js) | `createComponent` 的 `__DEV__` 分支注册实例并绑定 `hmrRerender` / `hmrReload`；`unmountComponent` 时 `unregisterHMR` |
+| [`src/vapor/apiCreateApp.js`](packages/pure-vapor/src/vapor/apiCreateApp.js) | 根组件 `mount` 后设置 `context.reload`（`unmount` + `mount` 同一容器），供根级 HMR `reload` 使用 |
+| [`src/index.js`](packages/pure-vapor/src/index.js) | `import './internal/hmr.js'` 确保入口加载时完成全局初始化（仅 dev 副作用） |
+
+### 与 plugin-vue 的协作（使用者无需手写）
+
+1. 保存仅改 template 的 `.vue` → 插件生成 `_rerender_only` → `accept` 回调走 `rerender(__hmrId, render)`。
+2. 保存改了 `<script>` 的 `.vue` → 走 `reload(__hmrId, updated)` → 对已挂载 Vapor 实例调用 `hmrReload` 或父级 `hmrRerender`。
+3. `CHANGED_FILE` 由插件在 `import.meta.hot.on('file-changed')` 里写入，非公开 API。
+
+### 验证
+
+- 单元：`packages/pure-vapor/__tests__/hmr.spec.js`（全局 runtime 存在、`createRecord` 去重）。
+- 集成：`vapor-e2e-test/helloworld` 在 `vue: workspace:pure-vapor@` + `pnpm devv` 下编辑 `HelloWorld.vue` 模板，不应再出现 `__VUE_HMR_RUNTIME__ is undefined`。
+
+### 限制
+
+- 仅 Vapor 组件路径；无 VDOM `renderCache` / `effect.run` 回退。
+- `pure-vapor` 不提供 `__VUE_HMR_RUNTIME__` 的公开命名导出（与 `vue` 一致，仅全局 + 插件约定）。
+- Custom Element 的 `ceReload` 分支保留，与 `vueElementBase` 一致。
 
 ## 预期成果
 

@@ -172,6 +172,16 @@ export function createVaporApp(rootComponent, rootProps = null) {
         app._instance = instance
         isMounted = true
         app._container = container
+        if (__DEV__) {
+          context.reload = () => {
+            const target = app._container
+            if (!target) {
+              return
+            }
+            app.unmount()
+            app.mount(target)
+          }
+        }
         if (container) {
           container.__vue_app__ = app
           if (container instanceof Element) {
