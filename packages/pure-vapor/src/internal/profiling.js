@@ -1,21 +1,13 @@
 import { formatComponentName } from './component.js'
 
 export function startMeasure(instance, type) {
-  if (
-    instance.appContext &&
-    instance.appContext.config.performance &&
-    isSupported()
-  ) {
+  if (instance.appContext && instance.appContext.config.performance) {
     perf.mark(`vue-${type}-${instance.uid}`)
   }
 }
 
 export function endMeasure(instance, type) {
-  if (
-    instance.appContext &&
-    instance.appContext.config.performance &&
-    isSupported()
-  ) {
+  if (instance.appContext && instance.appContext.config.performance) {
     const startTag = `vue-${type}-${instance.uid}`
     const endTag = startTag + `:end`
     const measureName = `<${formatComponentName(instance, instance.type)}> ${type}`
@@ -27,13 +19,6 @@ export function endMeasure(instance, type) {
   }
 }
 
-let supported
-let perf
-
-function isSupported() {
-  if (supported === undefined) {
-    supported = typeof window !== 'undefined' && window.performance != null
-    perf = supported ? window.performance : null
-  }
-  return supported
-}
+// window.performance 除IE外都支持
+let supported = true
+let perf = window.performance

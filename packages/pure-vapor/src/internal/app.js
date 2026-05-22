@@ -6,20 +6,18 @@ export function createAppContext() {
     app: null,
     config: {
       isNativeTag: NO,
-      performance: false,
-      globalProperties: {},
+      performance: false, // 是否性能监测
       errorHandler: undefined,
       warnHandler: undefined,
-      compilerOptions: {},
     },
-    components: {},
-    directives: {},
-    provides: Object.create(null),
+    components: {}, // 组件注册表
+    directives: {}, // 指令注册表
+    provides: Object.create(null), // 提供者注册表
   }
 }
 
-export function validateComponentName(name, { isNativeTag }) {
-  if (isBuiltInTag(name) || isNativeTag(name)) {
+export function validateComponentName(name, config) {
+  if (isBuiltInTag(name) || config.isNativeTag(name)) {
     warn(
       'Do not use built-in or reserved HTML elements as component id: ' + name,
     )
@@ -35,12 +33,6 @@ export function validateDirectiveName(name) {
 export let currentApp = null
 
 /** 在没有组件实例时（不在 setup 里），临时把「当前 app」切到某个 app，让 inject() 能读到该 app 在 app.provide() 里注册的值。
-
-apiInject.js 里逻辑是：
-
-  if (instance || currentApp) {
-    let provides = currentApp
-      ? currentApp._context.provides
  */
 export function runWithAppContext(app, fn) {
   const lastApp = currentApp

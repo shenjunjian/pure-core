@@ -115,6 +115,26 @@ export function createVaporApp(rootComponent, rootProps = null) {
       return app
     },
 
+    provide(key, value) {
+      if (__DEV__ && key in context.provides) {
+        if (hasOwn(context.provides, key)) {
+          warn(
+            `App already provides property with key "${String(key)}". ` +
+              `It will be overwritten with the new value.`,
+          )
+        } else {
+          warn(
+            `App already provides property with key "${String(key)}" inherited from its parent element. ` +
+              `It will be overwritten with the new value.`,
+          )
+        }
+      }
+
+      context.provides[key] = value
+
+      return app
+    },
+
     mount(container) {
       container = normalizeContainer(container)
       if (!isMounted) {
@@ -197,26 +217,6 @@ export function createVaporApp(rootComponent, rootProps = null) {
       } else if (__DEV__) {
         warn(`Cannot unmount an app that is not mounted.`)
       }
-    },
-
-    provide(key, value) {
-      if (__DEV__ && key in context.provides) {
-        if (hasOwn(context.provides, key)) {
-          warn(
-            `App already provides property with key "${String(key)}". ` +
-              `It will be overwritten with the new value.`,
-          )
-        } else {
-          warn(
-            `App already provides property with key "${String(key)}" inherited from its parent element. ` +
-              `It will be overwritten with the new value.`,
-          )
-        }
-      }
-
-      context.provides[key] = value
-
-      return app
     },
 
     runWithContext(fn) {
