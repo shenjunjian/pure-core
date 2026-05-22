@@ -21,4 +21,4 @@ export function endMeasure(instance, type) {
 
 // window.performance 除IE外都支持
 let supported = true
-let perf = window.performance
+let perf = globalThis.performance
