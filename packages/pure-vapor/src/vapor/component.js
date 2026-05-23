@@ -18,7 +18,7 @@ import {
   ShapeFlags,
 } from '@vue/shared'
 import { ErrorCodes, callWithErrorHandling } from '../internal/errorHandling.js'
-import { expose, nextUid, getComponentName } from '../internal/component.js'
+import { expose } from '../internal/component.js'
 import { getFunctionalFallthrough } from '../internal/functionalFallthrough.js'
 import { warnExtraneousAttributes } from '../internal/warning.js'
 import { isAsyncWrapper } from '../internal/asyncComponent.js'
@@ -74,6 +74,15 @@ import { hmrReload, hmrRerender } from './hmr.js'
 
 export let isApplyingFallthroughProps = false
 
+/** 创建组件实例
+ * @param {any} component 组件定义或渲染函数
+ * @param {any} rawProps 原始属性
+ * @param {any} rawSlots 原始插槽
+ * @param {boolean} isSingleRoot 组件是否是父模板 block 的唯一根级子节点， 用于把父级 fallthrough attrs 并入子组件 rawProps.$
+ * @param {boolean} once 对应模板上的 v-once &&  v-if 也有 once
+ * @param {any} appContext 应用上下文
+ * @param {boolean} managedMount 是否由调用方负责挂载,为 true 时,不会在末尾自动 mountComponent——但 save/reset 模式不变，避免 setup 期间子节点误用外层 insertion 状态
+ */
 export function createComponent(
   component,
   rawProps,
@@ -91,12 +100,15 @@ export function createComponent(
     appContext = (currentInstance && currentInstance.appContext) || emptyContext
   }
 
+  // 单根结点的组件时，需要继承父级 fallthrough attrs.
   if (
     isSingleRoot &&
     component.inheritAttrs !== false &&
     isVaporComponent(currentInstance) &&
-    currentInstance.hasFallthrough
+    currentInstance.hasFallthrough // 是否存在未声明为 prop 的属性, 需要我传递给子组件的attrs
   ) {
+    // 故意把 父组件的 attrs Proxy 放进子组件的 rawProps.$
+    // 子组件后续通过 getAttrFromRawProps / resolveFunctionSource 解析 $ 时，会拿到这个 Proxy，再通过 Proxy 的 get / ownKeys / has trap 读出真正的 attr 值
     const attrs = currentInstance.attrs
     if (rawProps && rawProps !== EMPTY_OBJ) {
       const dynamic = rawProps.$ || (rawProps.$ = [])
@@ -106,6 +118,7 @@ export function createComponent(
     }
   }
 
+  // TODO: 待分析
   if (
     isKeepAliveEnabled &&
     currentInstance &&
@@ -115,7 +128,7 @@ export function createComponent(
     const cached = currentInstance.ctx.getCachedComponent(component)
     if (cached) return cached
   }
-
+  // TODO: 待分析
   if (isTeleportEnabled && isVaporTeleport(component)) {
     const frag = component.process(rawProps, rawSlots)
     if (_insertionParent) {
@@ -133,11 +146,13 @@ export function createComponent(
     once,
   )
 
+  // TODO: 待分析
   if (isKeepAliveEnabled && currentKeepAliveCtx && !isAsyncWrapper(instance)) {
     currentKeepAliveCtx.processShapeFlag(instance)
     setCurrentKeepAliveCtx(null)
   }
 
+  // reset currentSlotOwner to null to avoid affecting the child components
   const prevSlotOwner = setCurrentSlotOwner(null)
   let hasWarningContext = false
   let hasInitMeasure = false
@@ -283,10 +298,12 @@ export const emptyContext = {
   provides: /*@__PURE__*/ Object.create(null),
 }
 
+let uid = 0
+/** 组件实例类， 通过 currentInstance 是否存在，判断是root还是子组件 */
 export class VaporComponentInstance {
   constructor(comp, rawProps, rawSlots, appContext, once) {
     this.vapor = true
-    this.uid = nextUid()
+    this.uid = uid++
     this.type = comp
     this.parent = currentInstance
 
@@ -370,6 +387,13 @@ export function isVaporComponent(value) {
   return value instanceof VaporComponentInstance
 }
 
+/**
+ * 按组件名解析资产组件，再交给 createComponentWithFallback 分发。
+ * 编译器在「根 block 内仅使用一次」的静态组件标签上会生成此调用（内联字符串名）；
+ * 若直接把字符串传给 createComponentWithFallback，会被当作原生/自定义元素标签而非组件名。
+ * @param {string} name 模板中的组件名（如 "MyComp"）
+ * @param {boolean} [maybeSelfReference] 为 true 时允许解析为当前组件自身（Foo__self）
+ */
 export function createAssetComponent(
   name,
   rawProps,
@@ -389,6 +413,13 @@ export function createAssetComponent(
   )
 }
 
+/**
+ * 根据已解析的 comp 创建组件或退化为普通元素。
+ * comp 来自 resolveComponent / resolveDynamicComponent 或编译期 hoist 的 _component_X。
+ * - NULL_DYNAMIC_COMPONENT：动态组件解析为空，渲染占位节点
+ * - 非 string：已解析为组件定义，走 createComponent
+ * - string：注册表未命中（resolveComponent 回退为原名），按标签名创建 DOM（原生标签或 custom element）
+ */
 export function createComponentWithFallback(
   comp,
   rawProps,
@@ -415,6 +446,14 @@ export function createComponentWithFallback(
   return createPlainElement(comp, rawProps, rawSlots, isSingleRoot, once)
 }
 
+/**
+ * 用 document.createElement 创建真实 DOM 元素（非 Vapor 组件实例）。
+ * 编译器在 isCustomElement、原生 <template>，或 createComponentWithFallback 解析失败时生成。
+ * @param {string} comp 标签名（如 "my-el"、"template"）
+ * @param {boolean} [isSingleRoot] 是否为父 block 唯一根（$root，供 fallthrough 等使用）
+ * @param {boolean} [once] 为 true 时 props 只应用一次（v-once）
+ * @returns {HTMLElement}
+ */
 export function createPlainElement(
   comp,
   rawProps,
@@ -422,6 +461,7 @@ export function createPlainElement(
   isSingleRoot,
   once,
 ) {
+  // 与 createComponent 相同：保存外层 insertion，清空后创建子内容，最后挂回
   const _insertionParent = insertionParent
   const _insertionAnchor = insertionAnchor
   resetInsertionState()
@@ -443,10 +483,12 @@ export function createPlainElement(
 
   if (rawSlots) {
     if (rawSlots.$) {
+      // 动态 default 插槽（v-if / v-for 等）：子树随 slot 函数变化
       const frag = new DynamicFragment(__DEV__ ? 'slot' : undefined)
       renderEffect(() => frag.update(getSlot(rawSlots, 'default')))
       insert(frag, el)
     } else {
+      // 静态 default 插槽：编译期固定的 slot 函数，执行一次得到 block
       const slot = getSlot(rawSlots, 'default')
       if (slot) {
         const block = slot()

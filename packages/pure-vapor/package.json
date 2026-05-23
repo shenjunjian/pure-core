@@ -3,6 +3,7 @@
   "version": "3.6.0-beta.14",
   "description": "Pure JavaScript Vapor runtime with only @vue/shared and @vue/reactivity",
   "main": "index.js",
+  "type": "module",
   "module": "dist/pure-vapor.esm-bundler.js",
   "files": [
     "index.js",

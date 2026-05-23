@@ -318,7 +318,13 @@ function resolveDefault(factory, instance) {
   setCurrentInstance(...prev)
   return res
 }
-
+/**  是否存在未声明为 prop 的属性, 需要我传递给子组件的attrs
+ *  1. rawProps.$ 存在
+ *  2. 组件未声明 props
+ *  3.rawProps 里至少有一个 key 不是已声明的 prop
+ *
+ * @eg < Child  data-id="1" /> data-id不是props时，它就为instance.hasFallthrough=true.
+ */
 export function hasFallthroughAttrs(comp, rawProps) {
   if (rawProps) {
     if (rawProps.$ || !comp.props) {

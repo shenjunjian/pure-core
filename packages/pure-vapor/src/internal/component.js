@@ -2,12 +2,6 @@ import { isRef, markRaw, proxyRefs } from '@vue/reactivity'
 import { isFunction, isArray } from '@vue/shared'
 import { warn } from './warning.js'
 
-let uid = 0
-
-export function nextUid() {
-  return uid++
-}
-
 export function getComponentName(Component, includeInferred = true) {
   return isFunction(Component)
     ? Component.displayName || Component.name
