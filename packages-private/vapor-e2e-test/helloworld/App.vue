@@ -1,7 +1,7 @@
 <script setup vapor>
-import HelloWorld from "./components/HelloWorld.vue";
+import Middle from "./components/Middle.vue";
 </script>
 
 <template>
-  <HelloWorld />
+  <Middle some-other-attr="1" />
 </template>

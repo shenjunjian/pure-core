@@ -1,4 +1,4 @@
-# packages\pure-vapor\src\vapor\componentSlots.js  `currentSlotOwner` 的作用
+# \vapor\componentSlots.js  `currentSlotOwner` 的作用
 
 
 `currentSlotOwner` 是一个**模块级运行时上下文变量**，用来记录当前正在执行的 slot 内容属于哪个组件实例（slot owner），与 `currentInstance`（当前正在渲染的组件）配合使用。

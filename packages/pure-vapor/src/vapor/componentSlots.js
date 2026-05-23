@@ -102,6 +102,9 @@ export function getSlot(target, key) {
   }
 }
 
+/** 返回当前slotOwner或currentInstance
+ * root组件， 返回null
+ */
 export function getScopeOwner() {
   return currentSlotOwner || currentInstance
 }

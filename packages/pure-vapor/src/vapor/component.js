@@ -190,7 +190,7 @@ export function createComponent(
 
   return instance
 }
-
+/** 组件的setup周期  setupPropsValidation -> 执行setup函数 -> handleSetupResult */
 export function setupComponent(instance, component) {
   const prevInstance = setCurrentInstance(instance)
   const prevSub = setActiveSub()
@@ -213,6 +213,7 @@ export function setupComponent(instance, component) {
     markAsyncBoundary(instance)
   }
 
+  // TODO: 暂不支持异步setup
   if (isAsyncSetup) {
     if (__DEV__) {
       warn(
@@ -267,6 +268,12 @@ function callRender(render, instance, setupState) {
   ])
 }
 
+/** 开发时，渲染组件
+ * 1. 设置当前渲染实例
+ * 2. 调用 render 函数， 如果 render 函数存在，则调用 callRender 函数，否则调用 callWithErrorHandling 函数。
+ * 3. 设置当前渲染实例
+ * 4. 返回 block
+ */
 export function devRender(instance) {
   const prev = setCurrentRenderingInstance(instance)
   try {
@@ -356,7 +363,7 @@ export class VaporComponentInstance {
         : rawSlots
       : EMPTY_OBJ
 
-    this.scopeId = getCurrentScopeId()
+    this.scopeId = getCurrentScopeId() // root 组件时为undefined
 
     if (comp.ce) {
       comp.ce(this)
@@ -364,7 +371,7 @@ export class VaporComponentInstance {
 
     if (__DEV__) {
       if (this.props === this.attrs) {
-        this.accessedAttrs = true
+        this.accessedAttrs = true // root 组件时为true
       } else {
         const attrs = this.attrs
         const instance = this
@@ -625,10 +632,14 @@ export function getRootElement(block, onDynamicFragment, recurse) {
 
 function handleSetupResult(setupResult, component, instance) {
   if (__DEV__) {
+    // Suspense 异步路径， setup resovle之后会再单独调用 handleSetupResult， 所以这里push一次。
+    // 无异步功能的话，这里多余的。
     pushWarningContext(instance)
   }
 
+  // 1. 开发，且setupResult不是block。
   if (__DEV__ && !isBlock(setupResult)) {
+    // 函数组件或 没有render函数，则报错。 设置block=[]
     if (isFunction(component)) {
       warn(`Functional vapor component must return a block directly.`)
       instance.block = []
@@ -638,6 +649,11 @@ function handleSetupResult(setupResult, component, instance) {
       )
       instance.block = []
     } else {
+      // 非函，且有render函数了， setupResult 可能是对象，也可能是函数。
+      // 1. 设置到 instance.devtoolsRawSetupState 上， 用于 devtools 展示。
+      // 2. 设置到 instance.setupState 上， 用于 render 函数中使用。
+      // 3. 如果是开发模式，则创建一个代理，用于在 render 函数中访问 setupState 时，进行警告。
+      // 4. 调用 devRender 函数， 用于在开发模式下，渲染组件。
       instance.devtoolsRawSetupState = setupResult
       instance.setupState = proxyRefs(setupResult)
       if (__DEV__) {
@@ -646,6 +662,8 @@ function handleSetupResult(setupResult, component, instance) {
       devRender(instance)
     }
   } else {
+    // 2. 生产模式，生产环境 setup 不会返回 bindings 对象，编译开关： inlineTemplate: true
+    // 它把setup + render 合并成 setup(){  return [n0,n1]}
     if (setupResult === EMPTY_OBJ && component.render) {
       instance.block = callRender(component.render, instance, setupResult)
     } else {

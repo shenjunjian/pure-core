@@ -2,6 +2,15 @@ import { EMPTY_OBJ, hasOwn, isArray, isFunction, isOn } from '@vue/shared'
 import { baseEmit } from '../internal/emit.js'
 import { resolveSource } from './componentProps.js'
 
+/** 组件定义对象的 emits 属性
+ *  1、精简写法：  
+ *  emits: ['click', 'update:modelValue']  =>  {click: null, 'update:modelValue': null}  
+ *  2、完整写法：  返回自身不变。  
+ *  emits: {  
+      submit: (payload) => payload && typeof payload.id === 'number',  
+      change: null,  
+    },     
+ */
 export function normalizeEmitsOptions(comp) {
   const cached = comp.__emitsOptions
   if (cached) return cached

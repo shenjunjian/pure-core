@@ -298,6 +298,10 @@ export function getKeysFromRawProps(rawProps) {
   return Array.from(new Set(keys))
 }
 
+/** 组件定义对象的 props 属性， 返回二元组 [normalized, needCastKeys]
+ * normalized: {type:String, shouldCast:bool(是否转数字), shouldCastTrue:bool(是否转布尔)}
+ * needCastKeys: 需要cast的数组。 比如 number, boolean的props名称会在这里。 ['count', 'isShow']
+ */
 export function normalizePropsOptions(comp) {
   const cached = comp.__propsOptions
   if (cached) return cached
@@ -341,6 +345,14 @@ export function hasFallthroughAttrs(comp, rawProps) {
   return false
 }
 
+/**
+ * 开发模式下为组件注册 props 校验副作用。
+ * pure-vapor 的 instance.props 是按需从 rawProps（含 $ 动态源）解析的 Proxy，
+ * 父级更新或动态 props 变化时类型/必填/custom validator 可能随之变化，
+ * 因此在 renderEffect 中反复读取 instance.props 并调用 validateProps，
+ * 与 runtime-core 在 initProps 时的一次性校验不同。
+ * 第二个参数 noLifecycle=true，避免校验重跑触发组件生命周期。
+ */
 export function setupPropsValidation(instance) {
   const rawProps = instance.rawProps
   if (!rawProps) return

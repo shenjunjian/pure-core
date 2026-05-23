@@ -43,6 +43,7 @@ function classify(str) {
   return str.replace(classifyRE, c => c.toUpperCase()).replace(/[-_]/g, '')
 }
 
+/** 用户的setup中调用该函数， 最终会设置到instance.exposed 上 */
 export function expose(instance, exposed) {
   if (__DEV__) {
     if (instance.exposed) {
