@@ -363,7 +363,9 @@ export class VaporComponentInstance {
         : rawSlots
       : EMPTY_OBJ
 
-    this.scopeId = getCurrentScopeId() // root 组件时为undefined
+    // root 组件时为undefined.
+    // Middle, hellowrold组件都有scopeId, 但创建时，middle的scopeId为undefined，hellowrold的scopeId为parent的scopeId
+    this.scopeId = getCurrentScopeId()
 
     if (comp.ce) {
       comp.ce(this)
@@ -523,6 +525,7 @@ export function mountComponent(instance, parent, anchor) {
   }
   if (instance.bm) invokeArrayFns(instance.bm)
   insert(instance.block, parent, anchor)
+
   setComponentScopeId(instance)
   if (instance.m) queuePostFlushCb(instance.m)
   if (
@@ -705,6 +708,9 @@ function handleSetupResult(setupResult, component, instance) {
   }
 }
 
+/** 创建该实例时外层的 scope 快照
+ * 外层是：slotOwner或currentInstance
+ */
 export function getCurrentScopeId() {
   const scopeOwner = getScopeOwner()
   return scopeOwner ? scopeOwner.type.__scopeId : undefined

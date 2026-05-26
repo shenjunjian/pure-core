@@ -166,6 +166,8 @@ export function createVaporApp(rootComponent, rootProps = null) {
               false,
               app._context,
             )
+          // instance.block 存的是「渲染产物」，子组件在挂载前会以 子组件 instance 的形式出现在父 block 里。
+          // 只有叶子组件，才显示的是真实的block
           mountComponent(instance, container)
           flushOnAppMount()
         })

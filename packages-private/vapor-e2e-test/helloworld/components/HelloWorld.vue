@@ -3,7 +3,7 @@ import { ref } from "vue";
 import viteLogo from "../assets/vite.svg";
 import heroImg from "../assets/hero.png";
 import vueLogo from "../assets/vue.svg";
-
+ 
 const count = ref(0);
 </script>
 
@@ -20,6 +20,8 @@ const count = ref(0);
     </div>
     <button type="button" class="counter" @click="count++">Count is {{ count }}</button>
   </section>
+
+  <slot name="default" />
 
   <div class="ticks"></div>
 
@@ -79,3 +81,10 @@ const count = ref(0);
   <div class="ticks"></div>
   <section id="spacer"></section>
 </template>
+
+
+<style scoped>
+ #spacer {
+  color: red;
+ }
+</style>
