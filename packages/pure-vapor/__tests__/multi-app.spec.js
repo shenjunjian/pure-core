@@ -4,7 +4,7 @@
 import { BindingTypes } from '@vue/compiler-dom'
 import { ref } from '@vue/reactivity'
 import { createVaporApp, inject, nextTick } from '../src/index.js'
-import { compileToPureVaporRender, flushAllApps } from './_utils.js'
+import { compileToPureVaporRender, flushAll } from './_utils.js'
 
 function makeMsgApp(msg) {
   const render = compileToPureVaporRender(`<div>{{ msg }}</div>`, {
@@ -50,27 +50,27 @@ describe('multi-app isolation', () => {
     app2.unmount()
     root1.remove()
     root2.remove()
-    await flushAllApps()
+    await flushAll()
   })
 
   test('independent refs update separate containers on document.body', async () => {
-    await flushAllApps()
+    await flushAll()
     expect(root1.textContent).toBe('app1')
     expect(root2.textContent).toBe('app2')
 
     msg1.value = 'updated1'
-    await flushAllApps()
+    await flushAll()
     expect(root1.textContent).toBe('updated1')
     expect(root2.textContent).toBe('app2')
 
     msg2.value = 'updated2'
-    await flushAllApps()
+    await flushAll()
     expect(root1.textContent).toBe('updated1')
     expect(root2.textContent).toBe('updated2')
   })
 
   test('alternate nextTick callbacks do not cross apps', async () => {
-    await flushAllApps()
+    await flushAll()
     const order = []
 
     msg1.value = 'tick1'
@@ -85,7 +85,7 @@ describe('multi-app isolation', () => {
       expect(root2.textContent).toBe('tick2')
     })
 
-    await flushAllApps()
+    await flushAll()
     await Promise.all([p1, p2])
     expect(order).toEqual(['app1', 'app2'])
   })
@@ -111,10 +111,10 @@ describe('multi-app isolation', () => {
   })
 
   test('single flush cycle applies DOM updates to both apps', async () => {
-    await flushAllApps()
+    await flushAll()
     msg1.value = 'alpha'
     msg2.value = 'beta'
-    await flushAllApps()
+    await flushAll()
     expect(root1.textContent).toBe('alpha')
     expect(root2.textContent).toBe('beta')
   })

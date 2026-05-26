@@ -107,13 +107,12 @@ isProject: false
 | 项 | runtime-vapor | pure-vapor | 迁移影响 |
 |----|---------------|------------|----------|
 | 依赖 | `runtime-dom` → `runtime-core` | 仅 `shared` + `reactivity` + `internal/` | 包更小；行为以 pure-vapor 为准 |
-| DOM 写入 | 同步直接操作 DOM | `domOps` → `jobDomOperatorList` → **rAF** 播放 | 同一 tick 内读 DOM 可能仍是旧布局；用 `nextTick` 或测试 `flushDomJobs()` |
-| `nextTick` | 无公开导出（upstream） | **公开**；在 **DOM flush 之后** 触发 | 与 microtask 版 `nextTick` 时序不同；勿假设与 Vue 3 CSR 完全一致 |
-| 同步逃生 | — | `runWithDomOpsSync`（内部/极少数路径） | 默认仍批量 |
+| DOM 写入 | 同步直接操作 DOM | 同步直接操作 DOM（与 runtime-vapor 一致；`domOps` 为薄封装） | 与官方 vapor 对齐 |
+| `nextTick` | 无公开导出（upstream） | **公开**；与 runtime-core scheduler 一致（microtask flush 之后） | 与 Vue 3 CSR 的 `nextTick` 语义一致 |
 | TypeScript | 有 `.d.ts` | **无** `types` | 自建 `declare module 'pure-vapor'` 或 JSDoc |
 | 构建格式 | esm-bundler | 同 | 非 Node SSR 运行时 |
 
-引用 Plan1：[DOM 批量调度](./pure-vapor_纯运行时_8015eb3b.plan.md) 序列图。
+引用 Plan1：[DOM 与调度](./pure-vapor_纯运行时_8015eb3b.plan.md)（已与 runtime-vapor 对齐，无批量 DOM 队列）。
 
 ### 4. 编译器仍可生成、运行时无符号（陷阱）
 
@@ -147,7 +146,7 @@ isProject: false
 | `setupContext` 分支 | `apiSetupHelpers.js` | 去掉，实例即上下文 | — |
 | `getInheritedScopeIds` 恒 `[]` | `scopeId.js` | 删死代码 | — |
 | `hydration.js` | `vapor/dom/` | 保留 no-op import | 无 hydration |
-| 模块级单例 scheduler/DOM（多 App 串扰） | `scheduler.js`, `domJobQueue.js` | Plan2 `_Internal` 分桶 | 文档注明：**当前**多 App 同页需谨慎；二期后改为「按 app 隔离」 |
+| 模块级单例 scheduler（多 App 串扰） | `scheduler.js` | Plan2 `_Internal` 分桶 | 文档注明：**当前**多 App 同页需谨慎；二期后改为「按 app 隔离」 |
 
 ### 7. 构建与工具链
 

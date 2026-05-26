@@ -1,14 +1,10 @@
 /**
  * @vitest-environment jsdom
  */
-import { flushDomJobs } from '../src/internal/domJobQueue.js'
 import { ref } from '@vue/reactivity'
 import { createIf, insert, renderEffect, template } from '../src/index.js'
 import { setElementText } from '../src/vapor/dom/prop.js'
-
-function flushAll() {
-  return Promise.resolve().then(() => flushDomJobs())
-}
+import { flushAll } from './_utils.js'
 
 describe('createIf', () => {
   test('basic', async () => {

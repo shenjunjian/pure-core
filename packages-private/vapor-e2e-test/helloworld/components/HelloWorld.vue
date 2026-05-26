@@ -1,14 +1,19 @@
 <script setup vapor>
-import { ref } from "vue";
+import { ref,onMounted } from "vue";
 import viteLogo from "../assets/vite.svg";
 import heroImg from "../assets/hero.png";
 import vueLogo from "../assets/vue.svg";
  
 const count = ref(0);
+const centerRef = ref(null);
+
+onMounted(() => {
+  console.log(centerRef.value);
+});
 </script>
 
 <template>
-  <section id="center">
+  <section id="center" ref="centerRef">
     <div class="hero">
       <img :src="heroImg" class="base" width="170" height="179" alt="" />
       <img :src="vueLogo" class="framework" alt="Vue logo" />

@@ -9,10 +9,10 @@ todos:
     content: 实现 src/internal/：scheduler、instance、errorHandling、app（无 mixin / Options API）、resolveAssets、props、emit、scopeId（不含 transition 运行时）
     status: completed
   - id: dom-job-queue
-    content: 实现 DOM 批量调度（jobDomOperatorList、domOps 门面、rAF flush、播放后 nextTick）；作为 pure-vapor 核心差异化能力
-    status: completed
+    content: ~~DOM 批量调度（jobDomOperatorList）~~ 已移除；DOM 写入与 runtime-vapor 一致为同步
+    status: cancelled
   - id: vapor-dom-block
-    content: 移植 vapor DOM 层（template/node/prop/event）、block、insertionState、renderEffect、控制流 API；所有 DOM 写操作经 domOps 入队
+    content: 移植 vapor DOM 层（template/node/prop/event）、block、insertionState、renderEffect、控制流 API；DOM 写操作同步（domOps 薄封装或直接原生 API）
     status: completed
   - id: vapor-component
     content: 移植 component 系统、slots、define* API、createVaporApp、fragment、templateRef
@@ -62,8 +62,7 @@ flowchart TB
   subgraph pureVapor [packages/pure-vapor]
     Index["src/index.js\n公开导出"]
     VaporCore["src/vapor/*\n自 runtime-vapor 移植"]
-    DomQueue["internal/domJobQueue\njobDomOperatorList + rAF"]
-    DomOps["vapor/dom/domOps\n写入门面"]
+    DomOps["vapor/dom/domOps.js\n同步 DOM 薄封装（可选）"]
     Internal["src/internal/*\n替代 runtime-dom/core"]
   end
 
@@ -76,10 +75,8 @@ flowchart TB
   SFC --> Index
   Index --> VaporCore
   VaporCore --> DomOps
-  DomOps --> DomQueue
-  DomQueue -->|"rAF flush"| DOM["浏览器 DOM"]
+  DomOps --> DOM["浏览器 DOM"]
   VaporCore --> Internal
-  Internal --> DomQueue
   VaporCore --> Shared
   VaporCore --> Reactivity
   Internal --> Shared
@@ -88,116 +85,17 @@ flowchart TB
 
 **核心思路**：以 [`packages/runtime-vapor`](packages/runtime-vapor) 为功能蓝本，按文件一对一移植为 JS，同时将 33 处 `from '@vue/runtime-dom'` 改为 `from '../internal/...'`；`internal/` 只实现 Vapor 实际用到的 runtime-core 子集（调度器、当前实例、资源解析、错误边界、emit/props 规范化、scoped id 等）。**首版刻意不移植 Transition 运行时**（`transition.ts`、`components/Transition*`、`internal/transition.js`），`block.js` 仅保留无动画的 insert/remove 路径。
 
-**pure-vapor 差异化**：相对 `runtime-vapor` 的同步 DOM 写入，pure-vapor 引入 **DOM Job 队列 + rAF 批量播放**，在 App 挂载、组件 mount/update/unmount、`renderEffect` 回调等路径中，DOM 变更先入队、再在下一帧统一落盘，播放结束后触发 `nextTick`。
+**DOM 写入**：与 `runtime-vapor` **一致，同步直接操作 DOM**。曾规划的 `jobDomOperatorList` + rAF 批量播放已移除；`onMounted` / `onUpdated` 与 DOM 落盘时序与官方 vapor 对齐。可选保留 [`vapor/dom/domOps.js`](packages/pure-vapor/src/vapor/dom/domOps.js) 作为集中封装的薄层（立即调用原生 API），非入队播放。
 
-## DOM 批量调度机制（jobDomOperatorList）
+## DOM 写入与调度（与 runtime-vapor 对齐）
 
-### 目标
-
-将分散的 DOM 写操作合并为「记录 → 播放」两阶段，减少布局抖动与强制同步布局，使一次响应式更新周期内的 DOM 变更在同一 `requestAnimationFrame` 中完成。
-
-### 数据流
-
-```mermaid
-sequenceDiagram
-  participant RE as renderEffect
-  participant Sched as internal/scheduler
-  participant Queue as domJobQueue
-  participant RAF as requestAnimationFrame
-  participant DOM as 真实DOM
-  participant NT as nextTick
-
-  RE->>Queue: queueDomOp(type, args)
-  Note over Queue: jobDomOperatorList.push(record)
-  Sched->>Queue: scheduleDomFlush() 调度结束或批次结束
-  RAF->>Queue: flushDomJobs()
-  loop 播放每条 record
-    Queue->>DOM: 执行对应原生操作
-  end
-  Queue->>Queue: jobDomOperatorList.length = 0
-  Queue->>NT: flushNextTickCbs()
-```
-
-### 核心模块：`src/internal/domJobQueue.js`
-
-| 符号 | 职责 |
-|------|------|
-| `jobDomOperatorList` | 当前待播放的 DOM 操作记录数组（模块内私有，可通过 `getPendingDomOpCount()` 等仅测试用接口观测） |
-| `queueDomOp(type, payload)` | 入队一条可播放记录 |
-| `flushDomJobs()` | 顺序播放 `jobDomOperatorList`，清空数组，调用 `flushNextTickCbs()` |
-| `scheduleDomFlush()` | 若尚未预约，则 `requestAnimationFrame(flushDomJobs)`（同帧合并为一次 flush） |
-| `runWithDomOps(fn)` | 同步执行 `fn`（其中 DOM 仅入队），结束后 `scheduleDomFlush()` |
-
-`nextTick` 实现在 [`internal/scheduler.js`](packages/pure-vapor/src/internal/scheduler.js)：`nextTick(cb)` 将回调登记到 `nextTickCbs`，**仅在 `flushDomJobs` 末尾** 与 DOM 播放绑定——保证 `nextTick` 回调执行时 DOM 已真实更新（语义上对齐「DOM 更新后的 nextTick」，但触发时机为 rAF 之后而非 microtask）。
-
-### 操作记录格式（可播放）
-
-每条记录为普通对象，通过 `type` 分发到播放器：
-
-```js
-// 示例结构（实现期可扩展 DomOpType 常量表）
-{ type: 'insertBefore', parent, node, anchor }
-{ type: 'removeChild', parent, child }
-{ type: 'appendChild', parent, child }
-{ type: 'setText', node, text }
-{ type: 'setAttribute', el, name, value }
-{ type: 'removeAttribute', el, name }
-{ type: 'setProperty', el, key, value }      // el[key] = value
-{ type: 'className', el, value }
-{ type: 'style', el, property, value }       // el.style[prop] = value
-{ type: 'addEventListener', el, event, handler, options }
-// Teleport 等复杂路径可拆为多条 primitive op 或专用 type + handler
-```
-
-播放器 `playDomOp(record)` 用 `switch (record.type)` 调用对应原生 API；**禁止**在 `queueDomOp` 路径上触碰真实 DOM（读布局同理需谨慎，见风险节）。
-
-### DOM 写入门面：`src/vapor/dom/domOps.js`
-
-所有会修改 DOM 的公开/内部 helper **统一经 `domOps` 导出**，不再在业务代码里直接 `parent.insertBefore` / `el.textContent =`：
-
-| 门面函数 | 入队 op | 原对应 |
-|----------|---------|--------|
-| `domInsert` / `domRemove` / `domPrepend` | `insertBefore` / `removeChild` 等 | [`block.js`](packages/runtime-vapor/src/block.ts) `insert`/`remove`/`prepend` |
-| `domSetText` / `domSetAttr` / … | `setText` / `setAttribute` / … | [`dom/prop.js`](packages/runtime-vapor/src/dom/prop.ts) |
-| `domMountClear` 等 | 专用 op | [`apiCreateApp.js`](packages/runtime-vapor/src/apiCreateApp.ts) 挂载前清空容器 |
-
-对外 API 名称不变（仍导出 `insert`、`setText` 等），其实现改为调用 `domOps` → `queueDomOp`。
-
-### 入队边界（必须覆盖的路径）
-
-| 场景 | 包裹方式 |
-|------|----------|
-| **App 加载** | `createVaporApp().mount()` → `runWithDomOps(() => mountComponent(...))` |
-| **组件加载** | `mountComponent` 内 block 插入、子树挂载 |
-| **组件更新** | `renderEffect` 的 `render()` 回调体（含编译器生成的 `setProp`/`setText`/`insert`） |
-| **组件删除** | `unmountComponent` → `remove` 链 |
-| **控制流** | `createIf` / `createFor` / `createKeyedFragment` 的 block 增删 |
-| **内置组件** | Teleport 的 DOM 移动：优先拆为 primitive op；若必须同步读 DOM，在播放器阶段或 `flushDomJobs` 之后执行 |
-
-`renderEffect` 调度逻辑保持：`notify` → `queueJob` → 同步执行 `render()`（其中 DOM 仅入队）；在 **当前 scheduler flush 结束** 时调用 `scheduleDomFlush()`（在 `internal/scheduler.js` 的 flush 末尾挂钩），将本 tick 内累积的 op 合并到下一帧播放。
-
-### 与 scheduler 的配合
-
-```mermaid
-flowchart LR
-  subgraph microtask [同一 microtask / flush]
-    J1[queueJob: renderEffect]
-    J2[queueJob: 其它组件 job]
-    J3[postFlushCb: lifecycle]
-  end
-  microtask --> ScheduleFlush[scheduleDomFlush]
-  ScheduleFlush --> RAF[rAF: flushDomJobs]
-  RAF --> Play[播放 jobDomOperatorList]
-  Play --> NextTick[flushNextTickCbs]
-```
-
-- 同一 flush 周期内多次 `scheduleDomFlush` 只注册 **一个** rAF 回调。
-- `inOnceSlot` 等需同步 DOM 的路径：可用 `runWithDomOpsSync`（立即 `flushDomJobs`）作为逃生舱，仅用于明确必须同步的极少数内部逻辑；默认仍走批量。
-
-### 导出
-
-- `nextTick`：作为 pure-vapor 公开 API 导出（`runtime-vapor` 无此导出，属 pure-vapor 扩展；不破坏现有 vapor helper 名称）。
-- 可选 `flushDomJobs` 仅 `__TEST__` 或内部测试用于不等待 rAF 的断言。
+| 项 | 行为 |
+|----|------|
+| `insert` / `setProp` / `setText` 等 | 同步写入真实 DOM（经 `domOps` 或直接 `parent.insertBefore`，与移植源一致） |
+| `renderEffect` | `notify` → `queueJob` → microtask flush 内同步 `render()`，DOM 在 job 执行时即更新 |
+| 生命周期 | `onMounted` / `onUpdated` 为 `queuePostFlushCb`，在 **同一 flush 周期 DOM 已写入后** 执行（与 `runtime-vapor` + `runtime-core` 一致） |
+| `nextTick` | 与 [`runtime-core` scheduler](packages/runtime-core/src/scheduler.ts) 一致：`currentFlushPromise \|\| resolvedPromise`，在 scheduler microtask flush 之后 |
+| `app.mount()` | 同步 `createComponent` → `mountComponent` → `flushOnAppMount()`，无 `runWithDomOps` / rAF 包裹 |
 
 ## 导出契约
 
@@ -250,7 +148,7 @@ flowchart TB
 | 计算与侦听 | `computed`、`watch`、`watchEffect`、`watchPostEffect`、`watchSyncEffect` |
 | 生命周期 | `onBeforeMount`、`onMounted`、`onBeforeUpdate`、`onUpdated`、`onBeforeUnmount`、`onUnmounted`、`onActivated`、`onDeactivated`、`onRenderTracked`、`onRenderTriggered`、`onErrorCaptured` |
 | 依赖注入 | `provide`、`inject`、`hasInjectionContext` |
-| 调度 | `nextTick`（pure-vapor：**DOM flush 后**触发，见上文 DOM 队列节） |
+| 调度 | `nextTick`（与 runtime-core 一致，scheduler microtask flush 之后） |
 | 组合式工具 | `useAttrs`、`useSlots`、`useModel`、`useTemplateRef`、`useId` |
 | `<script setup>` 宏运行时 | `defineProps`、`defineEmits`、`defineExpose`、`defineSlots`、`defineModel`、`withDefaults`；`defineOptions` 仅作**编译期宏** no-op stub（写入 `name` / `inheritAttrs` 等元数据），**不是** Options API 运行时 |
 | 实例 | `getCurrentInstance` |
@@ -338,8 +236,7 @@ packages/pure-vapor/
 ├── src/
 │   ├── index.js          # 公开导出入口
 │   ├── internal/         # 替代 runtime-dom/core（不对外文档化）
-│   │   ├── domJobQueue.js    # jobDomOperatorList、queueDomOp、flushDomJobs、scheduleDomFlush
-│   │   ├── scheduler.js      # queueJob, queuePostFlushCb, nextTick, flush 末 hook scheduleDomFlush
+│   │   ├── scheduler.js      # queueJob, queuePostFlushCb, nextTick（与 runtime-core 一致）
 │   │   ├── instance.js       # currentInstance, setCurrentInstance, lifecycle
 │   │   ├── errorHandling.js  # callWithErrorHandling, warn, ErrorCodes
 │   │   ├── app.js            # createAppAPI, normalizeContainer, flushOnAppMount
@@ -355,7 +252,7 @@ packages/pure-vapor/
 │       ├── hmr.js            # __DEV__：hmrRerender / hmrReload（供 internal/hmr 调用）
 │       ├── renderEffect.js
 │       ├── dom/
-│       │   └── domOps.js     # DOM 写入门面，全部 queueDomOp
+│       │   └── domOps.js     # 同步 DOM 薄封装（可选，与 runtime-vapor 行为一致）
 │       ├── directives/
 │       ├── components/
 │       └── ...
@@ -373,7 +270,7 @@ packages/pure-vapor/
    - **无** `peerDependencies`、**无** `types`
 2. `src/index.js` 先按导出契约搭骨架（reactivity/shared 再导出 + 其余 stub），确保 `vp run build pure-vapor` 可通过；完整公开面在 **exports-index** 阶段对齐 `index-with-vapor`（见「导出契约」）。
 3. 实现 `internal/scheduler.js`（含 `nextTick`）、`internal/instance.js`、`internal/errorHandling.js`、`internal/app.js`——这是 [`renderEffect.js`](packages/runtime-vapor/src/renderEffect.ts)、[`component.js`](packages/runtime-vapor/src/component.ts) 的硬依赖。
-4. **实现 `internal/domJobQueue.js` + `vapor/dom/domOps.js` 骨架**：`queueDomOp` / `flushDomJobs` / `scheduleDomFlush` / `runWithDomOps`；scheduler flush 末尾挂钩；单测验证「入队 → rAF 播放 → nextTick」顺序。
+4. **实现 `internal/scheduler.js` + `vapor/dom/domOps.js`**：scheduler 与 runtime-core 对齐；`domOps` 同步调用原生 DOM API（无入队/rAF）。
 
 ### 阶段 B：Vapor DOM 与 Block 核心（编译器最频繁路径）
 
@@ -383,9 +280,9 @@ packages/pure-vapor/
 |------|--------|------|
 | 模板克隆 | `dom/template.js` | 去掉 `hydration.ts` 引用；`withHydration` 改为 no-op 或直接删除调用链 |
 | 节点定位 | `dom/node.js` | `child`/`nthChild`/`next`/`txt`（读 DOM，保持同步） |
-| Block | `block.js`, `insertionState.js` | `insert`/`remove`/`prepend` 经 `domOps` 入队；**剔除** `TransitionBlock`、`$transition`、`performTransitionEnter/Leave` 分支，仅保留直接 DOM 插入/移除 |
-| 属性/事件 | `dom/prop.js`, `dom/event.js` | 全部写操作经 `domOps` |
-| 副作用 | `renderEffect.js` | `RenderEffect extends ReactiveEffect`；`render()` 内 DOM 仅入队 |
+| Block | `block.js`, `insertionState.js` | `insert`/`remove`/`prepend` 同步 DOM；**剔除** Transition 分支 |
+| 属性/事件 | `dom/prop.js`, `dom/event.js` | 同步写 DOM（经 `domOps` 或直接原生 API） |
+| 副作用 | `renderEffect.js` | `RenderEffect extends ReactiveEffect`；`render()` 内同步更新 DOM |
 | 控制流 | `apiCreateIf.js`, `apiCreateFor.js`, `apiCreateFragment.js`, `helpers/setKey.js` | 与快照行为一致 |
 
 ### 阶段 C：组件系统
@@ -395,8 +292,8 @@ packages/pure-vapor/
 | 实例 | `component.js`, `componentProps.js`, `componentEmits.js`, `componentSlots.js` |
 | API | `apiDefineComponent.js`, `apiDefineAsyncComponent.js`, `apiCreateDynamicComponent.js`, `apiSetupHelpers.js`, `apiTemplateRef.js` |
 | Fragment | `fragment.js` |
-| App | `apiCreateApp.js`（仅 `createVaporApp`；`mount` 包在 `runWithDomOps`；删除 devtools 分支；**不**移植 `initFeatureFlags` / `featureFlags.js`） |
-| 组件生命周期 | `mountComponent` / `unmountComponent` | 挂载/卸载 DOM 变更经 `domOps` |
+| App | `apiCreateApp.js`（仅 `createVaporApp`；`mount` 同步挂载链；删除 devtools 分支；**不**移植 `initFeatureFlags`） |
+| 组件生命周期 | `mountComponent` / `unmountComponent` | 挂载/卸载同步 DOM（与 runtime-vapor 一致） |
 
 **已移植（dev-only）**：`internal/hmr.js`（全局 `__VUE_HMR_RUNTIME__`）、`vapor/hmr.js`（`hmrRerender` / `hmrReload`）；`component.js` 在 `__DEV__` 下 `registerHMR` / `unregisterHMR`；`apiCreateApp` 挂载根组件时设置 `appContext.reload`。生产构建中 `__DEV__` 为 false，全局初始化与实例注册代码可被摇树优化掉。
 
@@ -404,7 +301,7 @@ packages/pure-vapor/
 
 | 模块 | 说明 |
 |------|------|
-| `components/Teleport.js`, `KeepAlive.js` | 移植；Teleport DOM 移动走 `domOps` |
+| `components/Teleport.js`, `KeepAlive.js` | 移植；Teleport DOM 移动同步写入 |
 | `directives/vShow.js`, `vModel.js`, `custom.js` | v-model 全系列 `apply*Model` |
 | `helpers/useCssVars.js` | SFC `useVaporCssVars` 注入需要 |
 | `apiDefineCustomElement.js` | 保留客户端 CE；去掉 SSR CE |
@@ -426,12 +323,7 @@ vp run test pure-vapor
 ## 测试策略（不修改 compiler 包）
 
 1. **快照回归**：在 `packages/pure-vapor/__tests__/` 用 `compiler-vapor` 的 `compile()` 编译 fixture 模板，设置 `runtimeModuleName: 'pure-vapor'`，对生成的 `render` 做 smoke test（`new Function` + 简单 `createVaporApp` 挂载）。
-2. **DOM 队列单测**（新增，优先）：
-   - 多次 `setText`/`insert` 在同一 flush 后只触发一次 rAF；
-   - `flushDomJobs` 后 `jobDomOperatorList` 为空；
-   - `nextTick` 在 DOM 播放之后执行；
-   - 测试环境用 `flushDomJobs()` 直调或 mock rAF，避免 flaky。
-3. **移植关键单测**：优先移植与 DOM 更新、v-for/v-if、组件、指令相关的用例；**跳过** Transition / TransitionGroup 相关用例；跑测试前需 `flushAll()`（microtask + `flushDomJobs()`）。
+2. **移植关键单测**：优先移植与 DOM 更新、v-for/v-if、组件、指令相关的用例；**跳过** Transition / TransitionGroup 相关用例；异步路径用 `flushAll()`（`await Promise.resolve()` 等待 scheduler）。
 4. **exports 冒烟**：收集 `vapor-e2e-test` / 典型 SFC 中 `from 'vue'` 的 named import，断言在 `pure-vapor` 上可解析（排除表中的符号应失败并记入 README）。
 5. **可选**：在 `packages-private/` 增加最小 vapor playground（仅文档说明，不强制进主 CI），演示 Vite alias：
 
@@ -460,8 +352,7 @@ resolve: { alias: { vue: 'pure-vapor' } }
 | `<Suspense>` / `<transition>` 模板仍可编译但运行失败 | README 明确不支持列表；不在本任务改 compiler |
 | 无 TypeScript 导致维护成本 | 保持与 `runtime-vapor` 文件结构平行，便于 diff 同步 |
 | `__DEV__` / feature flags | 构建时沿用 monorepo 的 `__DEV__` 替换；去掉 devtools / prod devtools 分支 |
-| rAF 延迟导致同步读 DOM 失效 | 文档说明；`nextTick` 绑定 DOM flush；必要时提供 `runWithDomOpsSync` 逃生舱 |
-| 操作顺序与 `runtime-vapor` 不一致 | 入队顺序严格按原 `insert`/`remove` 调用顺序播放；单测对比挂载结果 HTML（不含 Transition 场景） |
+| 与 `runtime-vapor` DOM/生命周期时序漂移 | 以 runtime-vapor 单测与 e2e 为黄金标准；`onMounted` 内应可读真实 DOM |
 
 ## Dev HMR（`@vitejs/plugin-vue` 兼容）
 
@@ -508,4 +399,4 @@ resolve: { alias: { vue: 'pure-vapor' } }
 - 独立包 `pure-vapor`：仅 `shared` + `reactivity`，纯 JS，ESM bundler 构建产物。
 - 导出集合 ≈ [`index-with-vapor.ts`](packages/vue/src/index-with-vapor.ts) 对 Vapor 有意义的公开 API（减去 VDOM / compile / SSR / interop / devtools / Suspense / **Transition** 等排除表）；含完整 `@vue/reactivity` 再导出与 `shared` 常用工具。
 - 可运行由 `compiler-vapor` 生成的 vapor 组件（在配置 `runtimeModuleName: 'pure-vapor'` 时），无 VNode 运行时依赖，包体积与调用链更短。
-- **DOM 批量调度**：`jobDomOperatorList` + rAF 播放 + 播放后 `nextTick`，作为相对 `runtime-vapor` 的核心性能与架构差异。
+- **DOM 与调度**：与 `runtime-vapor` 一致，同步 DOM + `runtime-core` 风格 scheduler / `nextTick`。

@@ -1,13 +1,9 @@
 /**
  * @vitest-environment jsdom
  */
-import { flushDomJobs } from '../src/internal/domJobQueue.js'
 import { insert, normalizeBlock, prepend, remove } from '../src/vapor/block.js'
 import { VaporFragment } from '../src/vapor/fragment.js'
-
-function flushAll() {
-  return Promise.resolve().then(() => flushDomJobs())
-}
+import { flushAll } from './_utils.js'
 
 const node1 = document.createTextNode('node1')
 const node2 = document.createTextNode('node2')

@@ -25,7 +25,6 @@ import {
 import { flushOnAppMount } from '../internal/scheduler.js'
 import { warn } from '../internal/warning.js'
 import { optimizePropertyLookup } from './dom/prop.js'
-import { runWithDomOps } from './dom/domOps.js'
 
 let uid = 0
 
@@ -146,31 +145,29 @@ export function createVaporApp(rootComponent, rootProps = null) {
           )
         }
         let instance
-        runWithDomOps(() => {
-          optimizePropertyLookup()
+        optimizePropertyLookup()
 
-          if (container.nodeType === 1) {
-            if (__DEV__ && container.childNodes.length) {
-              warn('mount target container is not empty and will be cleared.')
-            }
-            container.textContent = ''
+        if (container.nodeType === 1) {
+          if (__DEV__ && container.childNodes.length) {
+            warn('mount target container is not empty and will be cleared.')
           }
+          container.textContent = ''
+        }
 
-          instance =
-            app._ceComponent ||
-            createComponent(
-              app._component,
-              app._props,
-              null,
-              false,
-              false,
-              app._context,
-            )
-          // instance.block 存的是「渲染产物」，子组件在挂载前会以 子组件 instance 的形式出现在父 block 里。
-          // 只有叶子组件，才显示的是真实的block
-          mountComponent(instance, container)
-          flushOnAppMount()
-        })
+        instance =
+          app._ceComponent ||
+          createComponent(
+            app._component,
+            app._props,
+            null,
+            false,
+            false,
+            app._context,
+          )
+        // instance.block 存的是「渲染产物」，子组件在挂载前会以 子组件 instance 的形式出现在父 block 里。
+        // 只有叶子组件，才显示的是真实的block
+        mountComponent(instance, container)
+        flushOnAppMount()
         app._instance = instance
         isMounted = true
         app._container = container

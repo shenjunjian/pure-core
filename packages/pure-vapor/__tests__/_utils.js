@@ -2,20 +2,14 @@
  * @vitest-environment jsdom
  */
 import { compile as compileVapor } from '@vue/compiler-vapor'
-import { flushDomJobs } from '../src/internal/domJobQueue.js'
 import * as pureVapor from '../src/index.js'
-import { createVaporApp } from '../src/index.js'
+import { createVaporApp, nextTick } from '../src/index.js'
 
 export { pureVapor }
 
-export async function flushAllApps() {
-  await Promise.resolve()
-  flushDomJobs()
+export function flushAll() {
+  return nextTick()
 }
-
-export const flushAll = flushAllApps
-
-// flushApp(app) will be added when scheduler/dom queues live on app._Internal.
 
 export function makeRender(
   initHost = () => {
@@ -45,7 +39,7 @@ export function makeRender(
     let instance
     let app
 
-    async function render(props, container = host) {
+    function render(props, container = host) {
       create(props)
       return mount(container)
     }
@@ -58,9 +52,8 @@ export function makeRender(
       return res()
     }
 
-    async function mount(container = host) {
+    function mount(container = host) {
       app.mount(container)
-      await flushAll()
       instance = app._instance
       return res()
     }

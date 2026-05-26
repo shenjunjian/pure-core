@@ -1,93 +1,79 @@
-import {
-  DomOpType,
-  queueDomOp,
-  runWithDomOps,
-  runWithDomOpsSync,
-} from '../../internal/domJobQueue.js'
-
-export { runWithDomOps, runWithDomOpsSync }
-
 export function domInsert(parent, node, anchor = null) {
-  queueDomOp(DomOpType.INSERT_BEFORE, { parent, node, anchor })
+  parent.insertBefore(node, anchor)
 }
 
 export function domRemove(parent, child) {
-  queueDomOp(DomOpType.REMOVE_CHILD, { parent, child })
+  parent.removeChild(child)
 }
 
 export function domAppendChild(parent, child) {
-  queueDomOp(DomOpType.APPEND_CHILD, { parent, child })
+  parent.appendChild(child)
 }
 
 export function domPrepend(parent, child) {
   const anchor = parent.firstChild
-  queueDomOp(DomOpType.INSERT_BEFORE, { parent, node: child, anchor })
+  parent.insertBefore(child, anchor)
 }
 
 export function domSetText(node, text) {
-  queueDomOp(DomOpType.SET_TEXT, { node, text })
+  node.textContent = text
 }
 
 export function domSetAttr(el, name, value) {
   if (value != null) {
-    queueDomOp(DomOpType.SET_ATTRIBUTE, { el, name, value })
+    el.setAttribute(name, value)
   } else {
-    queueDomOp(DomOpType.REMOVE_ATTRIBUTE, { el, name })
+    el.removeAttribute(name)
   }
 }
 
 export function domSetAttrNS(el, ns, name, value) {
   if (value != null) {
-    queueDomOp(DomOpType.SET_ATTRIBUTE_NS, { el, ns, name, value })
+    el.setAttributeNS(ns, name, value)
   } else {
-    queueDomOp(DomOpType.REMOVE_ATTRIBUTE_NS, { el, ns, name })
+    el.removeAttributeNS(ns, name)
   }
 }
 
 export function domSetProperty(el, key, value) {
-  queueDomOp(DomOpType.SET_PROPERTY, { el, key, value })
+  el[key] = value
 }
 
 export function domSetClassName(el, value) {
-  queueDomOp(DomOpType.CLASS_NAME, { el, value })
+  el.className = value
 }
 
 export function domSetStyle(el, property, value) {
-  queueDomOp(DomOpType.STYLE, { el, property, value })
+  el.style[property] = value
 }
 
 export function domAddEventListener(el, event, handler, options) {
-  queueDomOp(DomOpType.ADD_EVENT_LISTENER, { el, event, handler, options })
+  el.addEventListener(event, handler, options)
 }
 
 export function domRemoveEventListener(el, event, handler, options) {
-  queueDomOp(DomOpType.REMOVE_EVENT_LISTENER, { el, event, handler, options })
+  el.removeEventListener(event, handler, options)
 }
 
 export function domSetInnerHTML(el, html) {
-  queueDomOp(DomOpType.SET_INNER_HTML, { el, html })
+  el.innerHTML = html
 }
 
 export function domSetTextContent(el, text) {
-  queueDomOp(DomOpType.SET_TEXT_CONTENT, { el, text })
+  el.textContent = text
 }
 
 export function domSetStyleProperty(style, name, value, priority) {
-  queueDomOp(DomOpType.SET_STYLE_PROPERTY, {
-    el: style,
-    name,
-    value,
-    priority: priority || '',
-  })
+  style.setProperty(name, value, priority || '')
 }
 
 export function domSetStyleCssText(el, cssText) {
-  queueDomOp(DomOpType.SET_STYLE_CSS_TEXT, { el, cssText })
+  el.style.cssText = cssText
 }
 
-/** Clear container children before app mount (queued). */
+/** Clear container children before app mount. */
 export function domMountClear(container) {
   while (container.firstChild) {
-    domRemove(container, container.firstChild)
+    container.removeChild(container.firstChild)
   }
 }

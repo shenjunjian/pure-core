@@ -18,8 +18,8 @@ todos:
     content: scheduler 迁入 app._Internal + 全局 microtask 协调 flush
     status: pending
   - id: dom-per-app
-    content: domJobQueue 按 app 分桶 + 全局 rAF 协调；nextTick 绑定 app
-    status: pending
+    content: ~~domJobQueue 按 app 分桶~~ 已取消（DOM 批量队列已从 pure-vapor 移除）
+    status: cancelled
   - id: render-ctx-migrate
     content: currentInstance/insertionState/slot/currentApp 迁入 _Internal.render
     status: pending
@@ -41,7 +41,7 @@ isProject: false
 当前架构要点（保持不变）：
 
 - 仅 Vapor 运行时 + `internal/` 替代 runtime-core/dom
-- DOM 写操作经 [`domJobQueue.js`](e:\core\packages\pure-vapor\src\internal\domJobQueue.js) + rAF
+- DOM 写操作与 runtime-vapor 一致，**同步**直接写入（无 `domJobQueue`）
 - App 已有 `_context` / `_instance`，但 **无** `app._Internal`；大量状态在模块顶层
 
 ```mermaid
@@ -77,7 +77,7 @@ flowchart TB
 |------|------|
 | [`apiCreateApp.js`](e:\core\packages\pure-vapor\src\vapor\apiCreateApp.js) 懒初始化 `_createApp = createAppAPI(...)` | 删除 `_createApp`；在 `createVaporApp` 内直接构造 app 对象 |
 | [`app.js`](e:\core\packages\pure-vapor\src\internal\app.js) `createAppAPI` 闭包 + `mount(_, isHydrate, namespace)` | `mount(container)` 仅接收容器；`mountApp` 不再透传未使用参数 |
-| `postPrepareApp` 再次设置 `app.vapor = true` 并包装 `mount` | 合并进一次 `createVaporApp`：`normalizeContainer` + `runWithDomOps` 在唯一 `mount` 实现里完成 |
+| `postPrepareApp` 再次设置 `app.vapor = true` 并包装 `mount` | 合并进一次 `createVaporApp`：`normalizeContainer` + 同步 `mountComponent` 在唯一 `mount` 实现里完成 |
 | `app.vapor` / `instance.vapor` 恒为 true | 保留一处即可（建议仅 `app.vapor` 作公开标记，实例侧可删 DEV 分支） |
 
 **保留**：`createAppContext()`、`validateComponentName`、`normalizeContainer`、`plugin`/`provide`/`component`/`directive` 等与 upstream 对齐的 App 表面行为。

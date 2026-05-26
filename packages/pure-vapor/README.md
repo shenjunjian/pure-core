@@ -36,8 +36,8 @@ resolve: {
 |----|------|
 | 依赖 | 仅 `shared` + `reactivity`，无 `runtime-dom` / `runtime-core` |
 | 语言 | 纯 `.js`，无 `.d.ts` |
-| DOM 更新 | 批量入队 + `requestAnimationFrame` 播放（`jobDomOperatorList`） |
-| `nextTick` | 在 DOM 播放完成后触发（pure-vapor 扩展 API） |
+| DOM 更新 | 与 `runtime-vapor` 一致，同步直接写入 DOM |
+| `nextTick` | 与 `runtime-core` 一致，在 scheduler microtask flush 之后 |
 
 ## 首版不支持
 
@@ -65,12 +65,11 @@ vp run test pure-vapor
 
 `packages/pure-vapor/__tests__/` 覆盖：
 
-- **DOM 队列**：`domJobQueue.spec.js`（入队顺序、rAF 合并、`nextTick` 在 DOM 播放之后）
 - **编译器冒烟**：`compileSmoke.spec.js`（`runtimeModuleName: 'pure-vapor'` 快照 + `new Function` 挂载）
 - **导出契约**：`exports.spec.js`（必需符号存在、排除表符号不存在）
 - **移植用例**：`block` / `if` / `for` / `apiCreateVaporApp` / `renderEffect` / `internal`（源自 `runtime-vapor`，跳过 Transition / Suspense / interop / hydration）
 
-需要断言 DOM 时，在 microtask 之后调用 `flushDomJobs()`（测试辅助见 `__tests__/_utils.js` 的 `flushAll()`）。
+需要等待 scheduler 队列时，使用 `__tests__/_utils.js` 的 `flushAll()`（`await Promise.resolve()`）。
 
 ## 开发
 

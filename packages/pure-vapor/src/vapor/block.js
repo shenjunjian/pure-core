@@ -6,7 +6,8 @@ import {
 } from './component.js'
 import { isComment } from './dom/hydration.js'
 import { isFragment } from './fragment.js'
-import { domInsert, domPrepend, domRemove } from './dom/domOps.js'
+import { _child } from './dom/node.js'
+import { domInsert, domRemove } from './dom/domOps.js'
 
 export function isBlock(val) {
   return (
@@ -42,6 +43,7 @@ export function isValidBlock(block) {
 }
 
 export function insert(block, parent, anchor = null) {
+  anchor = anchor === 0 ? parent.$fc || _child(parent) : anchor
   if (block instanceof Node) {
     domInsert(parent, block, anchor)
   } else if (isVaporComponent(block)) {
@@ -68,6 +70,7 @@ export function insert(block, parent, anchor = null) {
 }
 
 export function move(block, parent, anchor = null) {
+  anchor = anchor === 0 ? parent.$fc || _child(parent) : anchor
   if (block instanceof Node) {
     domInsert(parent, block, anchor)
   } else if (isVaporComponent(block)) {
