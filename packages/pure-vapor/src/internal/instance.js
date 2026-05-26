@@ -9,12 +9,6 @@ export function getCurrentInstance() {
   return currentInstance
 }
 
-export let isInSSRComponentSetup = false
-
-export let setInSSRSetupState = v => {
-  isInSSRComponentSetup = v
-}
-
 let simpleSetCurrentInstance = i => {
   currentInstance = i
 }

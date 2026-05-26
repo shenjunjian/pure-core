@@ -2,15 +2,12 @@ import { isPromise } from '@vue/shared'
 import {
   currentInstance,
   getCurrentInstance,
-  isInSSRComponentSetup,
   setCurrentInstance,
-  setInSSRSetupState,
 } from '../internal/instance.js'
 import { warn } from '../internal/warning.js'
 
 export function withAsyncContext(getAwaitable) {
   const ctx = getCurrentInstance()
-  const inSSRSetup = isInSSRComponentSetup
   if (__DEV__ && !ctx) {
     warn(
       `withAsyncContext called without active current instance. ` +
@@ -19,16 +16,10 @@ export function withAsyncContext(getAwaitable) {
   }
   let awaitable = getAwaitable()
   setCurrentInstance(null, undefined)
-  if (inSSRSetup) {
-    setInSSRSetupState(false)
-  }
 
   const restore = () => {
     const resetStoppedScope = ctx && !ctx.scope.active ? ctx.scope : undefined
     setCurrentInstance(ctx)
-    if (inSSRSetup) {
-      setInSSRSetupState(true)
-    }
     return () => {
       if (resetStoppedScope) resetStoppedScope.reset()
     }
@@ -36,9 +27,6 @@ export function withAsyncContext(getAwaitable) {
 
   const cleanup = () => {
     setCurrentInstance(null, undefined)
-    if (inSSRSetup) {
-      setInSSRSetupState(false)
-    }
   }
 
   if (isPromise(awaitable)) {

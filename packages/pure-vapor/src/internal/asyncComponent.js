@@ -98,7 +98,3 @@ export function useAsyncComponentState(delay, timeout, onError) {
 
   return { loaded, error, delayed }
 }
-
-export function performAsyncHydrate() {
-  // no-op: pure-vapor does not support hydration
-}

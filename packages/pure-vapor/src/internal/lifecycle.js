@@ -4,11 +4,7 @@ import {
   ErrorTypeStrings,
   callWithAsyncErrorHandling,
 } from './errorHandling.js'
-import {
-  currentInstance,
-  isInSSRComponentSetup,
-  setCurrentInstance,
-} from './instance.js'
+import { currentInstance, setCurrentInstance } from './instance.js'
 import { LifecycleHooks } from './enums.js'
 import { warn } from './warning.js'
 
@@ -50,13 +46,14 @@ export function injectHook(
 
 const createHook =
   lifecycle =>
+  /**
+   * 创建生命周期钩子
+   * @param {Function} hook 用户的函数
+   * @param {Object} target 组件实例
+   * @returns {Function} 生命周期钩子函数
+   */
   (hook, target = currentInstance) => {
-    if (
-      !isInSSRComponentSetup ||
-      lifecycle === LifecycleHooks.SERVER_PREFETCH
-    ) {
-      injectHook(lifecycle, (...args) => hook(...args), target)
-    }
+    injectHook(lifecycle, (...args) => hook(...args), target)
   }
 
 export const onBeforeMount = createHook(LifecycleHooks.BEFORE_MOUNT)

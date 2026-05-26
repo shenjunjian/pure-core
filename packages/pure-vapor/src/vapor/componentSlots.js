@@ -24,14 +24,6 @@ export function setCurrentSlotOwner(owner) {
   return prev
 }
 
-export function getCurrentSlotEndAnchor() {
-  return null
-}
-
-export function isHydratingSlotFallbackActive() {
-  return false
-}
-
 export const dynamicSlotsProxyHandlers = {
   get: getSlot,
   has: (target, key) => !!getSlot(target, key),

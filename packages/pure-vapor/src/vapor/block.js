@@ -4,7 +4,6 @@ import {
   mountComponent,
   unmountComponent,
 } from './component.js'
-import { isComment } from './dom/hydration.js'
 import { isFragment } from './fragment.js'
 import { _child } from './dom/node.js'
 import { domInsert, domRemove } from './dom/domOps.js'
@@ -147,17 +146,8 @@ export function normalizeBlock(block) {
 
 export function findBlockNode(block) {
   const lastChild = findLastChild(block)
-  let parentNode = lastChild.parentNode
-  let nextNode = lastChild.nextSibling
-
-  if (
-    nextNode &&
-    isComment(nextNode, ']') &&
-    isFragmentBlock(block) &&
-    !isComment(lastChild, ']')
-  ) {
-    nextNode = nextNode.nextSibling
-  }
+  const parentNode = lastChild.parentNode
+  const nextNode = lastChild.nextSibling
 
   return { parentNode, nextNode }
 }

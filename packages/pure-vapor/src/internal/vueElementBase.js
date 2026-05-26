@@ -33,9 +33,7 @@ export class VueElementBase extends BaseClass {
     this._props = props
     this._createApp = createAppFn
 
-    if (this._needsHydration()) {
-      this._root = this.shadowRoot
-    } else if (def.shadowRoot !== false) {
+    if (def.shadowRoot !== false) {
       this.attachShadow(
         extend({}, def.shadowRootOptions, {
           mode: 'open',
@@ -471,9 +469,5 @@ export class VueElementBase extends BaseClass {
         }
       }
     }
-  }
-
-  _needsHydration() {
-    return false
   }
 }
