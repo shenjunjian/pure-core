@@ -222,6 +222,11 @@ function flushJobs(seen) {
   }
 }
 
+/** 用来取消尚未执行的 mounted / activated 后置回调，
+ * 避免组件已经卸载或失活后，这些钩子仍被调度器执行
+ *
+ * hook.flags 未提前赋值。 位运算会把操作数转成 32 位整数：undefined 先变成 NaN，再变成 0。
+ * */
 export function invalidateMount(hooks) {
   if (hooks) {
     for (let i = 0; i < hooks.length; i++) {

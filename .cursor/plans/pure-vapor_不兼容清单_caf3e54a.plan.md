@@ -136,6 +136,20 @@ isProject: false
 | HMR 专用模块 | 未移植（Plan1 可选二期） |
 | Devtools hook | 无；源码或仍有 `devtoolsRawSetupState` 等 DEV 字段，无对外 devtools API |
 
+#### 5.1 生命周期钩子
+
+`beforeCreate` / `created` 在 pure-vapor 中**未实现**；枚举里虽有占位，但运行时不会触发。
+
+| 项 | 状态 | 说明 |
+|----|------|------|
+| `beforeCreate` / `created`（Options API） | 不支持 | 无 `applyOptions`；`mountComponent` 前不会 invoke `instance.bc` / `instance.c` |
+| `onBeforeCreate` / `onCreated`（Composition API） | 不导出、不实现 | [`lifecycle.js`](packages/pure-vapor/src/internal/lifecycle.js) 无对应 API；[`index.js`](packages/pure-vapor/src/index.js) 未导出 |
+| `LifecycleHooks.BEFORE_CREATE` / `CREATED`（`bc` / `c`） | 仅内部占位 | 见 [`enums.js`](packages/pure-vapor/src/internal/enums.js)、[`errorHandling.js`](packages/pure-vapor/src/internal/errorHandling.js)；与 runtime-core 枚举对齐，**非可用生命周期** |
+| 实际组件初始化顺序 | `createComponent` → `setupComponent`（执行 `setup`）→ `mountComponent` | 首个被调用的生命周期为 **`onBeforeMount`**（`instance.bm`） |
+| 迁移替代 | — | **`setup()` 同步代码** 承担 `created` 职责；DOM 挂载前用 **`onBeforeMount`**，挂载后用 **`onMounted`** |
+
+与 `@vue/runtime-vapor` 一致：[`component.ts`](packages/runtime-vapor/src/component.ts) 类型上声明 `bc?` / `c?`，运行时同样不 invoke。
+
 ### 6. 源码残留 vs 对外承诺（Plan2 清理中）
 
 登记「**内部仍有痕迹、对外视为不支持**」，避免 Review 误判为已支持：

@@ -22,8 +22,6 @@ export const ErrorCodes = {
 
 export const ErrorTypeStrings = {
   [LifecycleHooks.SERVER_PREFETCH]: 'serverPrefetch hook',
-  [LifecycleHooks.BEFORE_CREATE]: 'beforeCreate hook',
-  [LifecycleHooks.CREATED]: 'created hook',
   [LifecycleHooks.BEFORE_MOUNT]: 'beforeMount hook',
   [LifecycleHooks.MOUNTED]: 'mounted hook',
   [LifecycleHooks.BEFORE_UPDATE]: 'beforeUpdate hook',
