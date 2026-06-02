@@ -26,24 +26,22 @@ export function render(_ctx) {
 `;
 
 exports[`compile > custom directive > component 1`] = `
-"import { resolveComponent as _resolveComponent, resolveDirective as _resolveDirective, setInsertionState as _setInsertionState, createComponentWithFallback as _createComponentWithFallback, withVaporDirectives as _withVaporDirectives, createIf as _createIf, withVaporCtx as _withVaporCtx, createAssetComponent as _createAssetComponent, template as _template } from 'vue';
+"import { resolveComponent as _resolveComponent, resolveDirective as _resolveDirective, setInsertionState as _setInsertionState, createComponentWithFallback as _createComponentWithFallback, withVaporDirectives as _withVaporDirectives, createIf as _createIf, createAssetComponent as _createAssetComponent, template as _template } from 'vue';
 const t0 = _template("<div>")
 
 export function render(_ctx) {
   const _component_Bar = _resolveComponent("Bar")
   const _directive_hello = _resolveDirective("hello")
   const _directive_test = _resolveDirective("test")
-  const n4 = _createAssetComponent("Comp", null, {
-    "default": _withVaporCtx(() => {
-      const n0 = _createIf(() => (true), () => {
-        const n3 = t0()
-        _setInsertionState(n3, null, 0)
-        const n2 = _createComponentWithFallback(_component_Bar)
-        _withVaporDirectives(n2, [[_directive_hello, void 0, void 0, { world: true }]])
-        return n3
-      }, null, 1, true)
-      return n0
-    })
+  const n4 = _createAssetComponent("Comp", null, () => {
+    const n0 = _createIf(() => (true), () => {
+      const n3 = t0()
+      _setInsertionState(n3, null, 0)
+      const n2 = _createComponentWithFallback(_component_Bar)
+      _withVaporDirectives(n2, [[_directive_hello, void 0, void 0, { world: true }]])
+      return n3
+    }, null, 17 /* BLOCK_SHAPE, ONCE */)
+    return n0
   }, true)
   _withVaporDirectives(n4, [[_directive_test]])
   return n4
@@ -229,7 +227,7 @@ export function render(_ctx, $props, $emit, $attrs, $slots) {
       _setText(x2, _toDisplayString(_ctx.selected === _for_item0.value.id ? 'danger' : ''))
     })
     return n6
-  }, (row) => (row.id))
+  }, (row) => (row.id), 8)
   n0.onReset(_selector0.reset)
   return n0
 }"
@@ -277,7 +275,7 @@ export function render(_ctx) {
   const n1 = _createIf(() => (true), () => {
     const n3 = t0()
     return n3
-  }, null, 1, true)
+  }, null, 49 /* BLOCK_SHAPE, TRUE_NO_SCOPE, ONCE */)
   _renderEffect(() => _setProp(n4, "disabled", _ctx.foo))
   return n6
 }"
@@ -291,7 +289,7 @@ export function render(_ctx) {
   const n3 = t0()
   const n1 = _child(n3)
   _setInsertionState(n1, null, 0)
-  const n0 = _createSlot("default", null)
+  const n0 = _createSlot()
   _setInsertionState(n3, null, 1)
   const n2 = _createAssetComponent("Comp")
   return n3
@@ -337,7 +335,7 @@ export function render(_ctx) {
       _setClassName(n2, (_for_item0.value.id === _ctx.state.selected ? 1 : 0), "danger")
     })
     return n2
-  }, (row) => (row.id))
+  }, (row) => (row.id), 8)
   n0.onReset(_selector0.reset)
   return n0
 }"
@@ -362,7 +360,7 @@ export function render(_ctx) {
   const n0 = _createFor(() => (_ctx.a.b), (_for_item0, _for_key0, _for_index0) => {
     const n2 = t0()
     return n2
-  })
+  }, undefined, 8)
   return n0
 }"
 `;

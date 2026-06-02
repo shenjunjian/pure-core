@@ -14,7 +14,16 @@ import {
 } from '@vue/reactivity'
 import { isArray, isObject, isString } from '@vue/shared'
 import { createComment, createTextNode } from './dom/node'
-import { type Block, insert, isValidBlock, remove } from './block'
+import {
+  type Block,
+  insert,
+  insertFragment,
+  insertNode,
+  isValidBlock,
+  remove,
+  removeFragment,
+  removeNode,
+} from './block'
 import { queuePostFlushCb, warn } from '@vue/runtime-dom'
 import { currentInstance, isVaporComponent } from './component'
 import {
@@ -41,6 +50,7 @@ import {
 import {
   ForBlock,
   ForFragment,
+  type VaporFragment,
   getCurrentSlotEndAnchor,
   isHydratingSlotFallbackActive,
 } from './fragment'
@@ -52,6 +62,7 @@ import {
   resetInsertionState,
 } from './insertionState'
 import { applyTransitionHooks, isTransitionEnabled } from './transition'
+import { setBlockKey } from './helpers/setKey'
 
 type Source = any[] | Record<any, any> | number | Set<any> | Map<any, any>
 
@@ -98,6 +109,7 @@ export const createFor = (
   let isMounted = false
   let oldBlocks: ForBlock[] = []
   let newBlocks: ForBlock[]
+  let newKeys: any[] | undefined
   let parent: ParentNode | undefined | null
   let parentAnchor: Node
   let pendingHydrationAnchor = false
@@ -105,10 +117,13 @@ export const createFor = (
     parentAnchor = __DEV__ ? createComment('for') : createTextNode()
   }
 
-  const frag = new ForFragment(oldBlocks)
+  const frag = new ForFragment(oldBlocks, !!(flags & VaporVForFlags.SLOT_ROOT))
   const instance = currentInstance!
-  const canUseFastRemove = !!(flags & VaporVForFlags.FAST_REMOVE)
   const isComponent = !!(flags & VaporVForFlags.IS_COMPONENT)
+  const canUseFastRemove =
+    !!(flags & VaporVForFlags.FAST_REMOVE) && !isComponent
+  const isSingleNode = !!(flags & VaporVForFlags.IS_SINGLE_NODE)
+  const isFragment = !!(flags & VaporVForFlags.IS_FRAGMENT)
 
   const slotOwner = currentSlotOwner
 
@@ -132,10 +147,26 @@ export const createFor = (
     const newLength = source.values.length
     const oldLength = oldBlocks.length
     newBlocks = new Array(newLength)
+    // Key expressions can depend on item fields, not just list shape. Evaluate
+    // them while the render effect is still the active subscriber so those deps
+    // can trigger keyed diff, then reuse the same keys below after
+    // setActiveSub() clears the active subscriber during patching.
+    newKeys = undefined
+    if (getKey) {
+      newKeys = new Array(newLength)
+      for (let i = 0; i < newLength; i++) {
+        newKeys[i] = getKey(...getItem(source, i))
+      }
+    }
 
     const prevSub = setActiveSub()
-
-    if (!isMounted) {
+    const wasMounted = isMounted
+    if (wasMounted && frag.onBeforeUpdate) {
+      for (let i = 0; i < frag.onBeforeUpdate.length; i++) {
+        frag.onBeforeUpdate[i]()
+      }
+    }
+    if (!wasMounted) {
       isMounted = true
       if (isHydrating) {
         hydrateList(source, newLength)
@@ -172,7 +203,8 @@ export const createFor = (
         // unkeyed fast path
         const commonLength = Math.min(newLength, oldLength)
         for (let i = 0; i < commonLength; i++) {
-          update((newBlocks[i] = oldBlocks[i]), getItem(source, i)[0])
+          const item = getItem(source, i)
+          update((newBlocks[i] = oldBlocks[i]), ...item)
         }
         for (let i = oldLength; i < newLength; i++) {
           mount(source, i)
@@ -184,8 +216,7 @@ export const createFor = (
         if (__DEV__) {
           const keyToIndexMap: Map<any, number> = new Map()
           for (let i = 0; i < newLength; i++) {
-            const item = getItem(source, i)
-            const key = getKey(...item)
+            const key = newKeys![i]
             if (key != null) {
               if (keyToIndexMap.has(key)) {
                 warn(
@@ -214,7 +245,7 @@ export const createFor = (
         while (endOffset < commonLength) {
           const index = newLength - endOffset - 1
           const item = getItem(source, index)
-          const key = getKey(...item)
+          const key = newKeys![index]
           const existingBlock = oldBlocks[oldLength - endOffset - 1]
           if (existingBlock.key !== key) break
           update(existingBlock, ...item)
@@ -228,11 +259,11 @@ export const createFor = (
 
         for (let i = 0; i < e1; i++) {
           const currentItem = getItem(source, i)
-          const currentKey = getKey(...currentItem)
+          const currentKey = newKeys![i]
           const oldBlock = oldBlocks[i]
           const oldKey = oldBlock.key
           if (oldKey === currentKey) {
-            update((newBlocks[i] = oldBlock), currentItem[0])
+            update((newBlocks[i] = oldBlock), ...currentItem)
           } else {
             queuedBlocks[queuedBlocksLength++] = [i, currentItem, currentKey]
             oldKeyIndexPairs[oldKeyIndexPairsLength++] = [oldKey, i]
@@ -245,7 +276,7 @@ export const createFor = (
 
         for (let i = e1; i < e3; i++) {
           const blockItem = getItem(source, i)
-          const blockKey = getKey(...blockItem)
+          const blockKey = newKeys![i]
           queuedBlocks[queuedBlocksLength++] = [i, blockItem, blockKey]
         }
 
@@ -341,7 +372,7 @@ export const createFor = (
                 const block = mount(source, index, anchorNode, item, key)
                 moveLink(block, nextBlock.prev, nextBlock)
               } else if (action.block.next !== nextBlock) {
-                insert(action.block, parent!, anchorNode)
+                insertForBlock(action.block, anchorNode)
                 moveLink(action.block, nextBlock.prev, nextBlock)
               }
             } else if ('source' in action) {
@@ -354,7 +385,7 @@ export const createFor = (
                 ? normalizeAnchor(anchor.nodes)
                 : parentAnchor
               if (!anchorNode.parentNode) anchorNode = parentAnchor
-              insert(action.block, parent!, anchorNode)
+              insertForBlock(action.block, anchorNode)
               moveLink(action.block, blocksTail)
               blocksTail = action.block
             }
@@ -369,19 +400,37 @@ export const createFor = (
     frag.nodes = [(oldBlocks = newBlocks)]
     if (parentAnchor) frag.nodes.push(parentAnchor)
 
-    if (isMounted && frag.onUpdated) frag.onUpdated.forEach(m => m())
+    if (wasMounted && frag.onUpdated) frag.onUpdated.forEach(m => m())
     setActiveSub(prevSub)
   }
 
   const needKey = renderItem.length > 1
   const needIndex = renderItem.length > 2
 
+  type InsertForBlock = (block: ForBlock, anchor: Node | undefined) => void
+  // IS_COMPONENT means the item owns its own scope, not that block.nodes is
+  // guaranteed to be a VaporComponentInstance. Component fallback may produce a
+  // plain DOM node, so component-shaped blocks still use the generic block path.
+  const insertForBlock: InsertForBlock = isSingleNode
+    ? (block, anchor) => insertNode(block.nodes as Node, parent!, anchor)
+    : isFragment
+      ? (block, anchor) =>
+          insertFragment(block.nodes as VaporFragment, parent!, anchor)
+      : (block, anchor) => insert(block.nodes, parent!, anchor)
+
+  type RemoveForBlock = (block: ForBlock) => void
+  const removeForBlock: RemoveForBlock = isSingleNode
+    ? block => removeNode(block.nodes as Node, parent!)
+    : isFragment
+      ? block => removeFragment(block.nodes as VaporFragment, parent!)
+      : block => remove(block.nodes, parent!)
+
   const mount = (
     source: ResolvedSource,
     idx: number,
     anchor: Node | undefined = parentAnchor,
     [item, key, index] = getItem(source, idx),
-    key2 = getKey && getKey(item, key, index),
+    key2 = newKeys ? newKeys[idx] : getKey && getKey(item, key, index),
   ): ForBlock => {
     const itemRef = shallowRef(item)
     // avoid creating refs if the render fn doesn't need it
@@ -416,10 +465,15 @@ export const createFor = (
 
     // apply transition for new nodes
     if (isTransitionEnabled && frag.$transition) {
+      if (frag.$transition.applyGroup) setBlockKey(block.nodes, block.key)
       applyTransitionHooks(block.nodes, frag.$transition)
     }
 
-    if (parent) insert(block.nodes, parent, anchor)
+    if (parent) {
+      const onBeforeInsert = frag.onBeforeInsert
+      if (onBeforeInsert) onBeforeInsert.forEach(fn => fn(block.nodes))
+      insertForBlock(block, anchor)
+    }
 
     return block
   }
@@ -541,7 +595,7 @@ export const createFor = (
       block.scope!.stop()
     }
     if (doRemove) {
-      remove(block.nodes, parent!)
+      removeForBlock(block)
     }
   }
 
@@ -715,11 +769,15 @@ function normalizeSource(source: any): ResolvedSource {
   } else if (isString(source)) {
     values = source.split('')
   } else if (typeof source === 'number') {
-    if (__DEV__ && !Number.isInteger(source)) {
-      warn(`The v-for range expect an integer value but got ${source}.`)
+    if (__DEV__ && (!Number.isInteger(source) || source < 0)) {
+      warn(
+        `The v-for range expects a positive integer value but got ${source}.`,
+      )
+      values = []
+    } else {
+      values = new Array(source)
+      for (let i = 0; i < source; i++) values[i] = i + 1
     }
-    values = new Array(source)
-    for (let i = 0; i < source; i++) values[i] = i + 1
   } else if (isObject(source)) {
     if (source[Symbol.iterator as any]) {
       values = Array.from(source as Iterable<any>)
@@ -761,11 +819,20 @@ function normalizeAnchor(node: Block): Node {
   if (node instanceof Node) {
     return node
   } else if (isArray(node)) {
-    return normalizeAnchor(node[0])
+    for (let i = 0; i < node.length; i++) {
+      const anchor = normalizeAnchor(node[i])
+      if (anchor) return anchor
+    }
+    return undefined!
   } else if (isVaporComponent(node)) {
     return normalizeAnchor(node.block!)
   } else {
-    return normalizeAnchor(node.nodes!)
+    const nodes = node.nodes
+    // Empty ForFragment keeps its insertion anchor in `nodes`, even though it
+    // is not a valid content block.
+    return isValidBlock(nodes)
+      ? normalizeAnchor(nodes)
+      : node.anchor || normalizeAnchor(nodes)
   }
 }
 
@@ -778,8 +845,8 @@ export function getRestElement(val: any, keys: string[]): any {
   return res
 }
 
-export function getDefaultValue(val: any, defaultVal: any): any {
-  return val === undefined ? defaultVal : val
+export function getDefaultValue(val: any, getDefaultVal: () => any): any {
+  return val === undefined ? getDefaultVal() : val
 }
 
 export function isForBlock(block: Block): block is ForBlock {

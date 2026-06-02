@@ -42,6 +42,7 @@ import {
   ForFragment,
   type VaporFragment,
   isFragment,
+  isSlotFragment,
 } from '../fragment'
 import {
   currentHydrationNode,
@@ -326,8 +327,15 @@ function applyResolvedTransitionHooks(
     }
   }
 
-  // delegate to TransitionGroup's apply logic for list children
-  if (hooks.applyGroup && block instanceof ForFragment) {
+  // Delegate list/root-slot wrappers back to TransitionGroup's apply logic.
+  // Other fragment shapes, such as keyed v-if branches, still need normal
+  // enter/leave hooks for their resolved single child.
+  if (
+    hooks.applyGroup &&
+    (block instanceof ForFragment ||
+      isSlotFragment(block) ||
+      (isVaporComponent(block) && isSlotFragment(block.block)))
+  ) {
     hooks.applyGroup(block, hooks.props, hooks.state, hooks.instance)
     return { hooks }
   }

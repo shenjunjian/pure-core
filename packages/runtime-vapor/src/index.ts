@@ -31,7 +31,7 @@ export {
   type VaporComponentInstance,
 } from './component'
 export { renderEffect } from './renderEffect'
-export { createSlot, withVaporCtx } from './componentSlots'
+export { createSlot } from './componentSlots'
 export { template } from './dom/template'
 export { createTextNode, child, nthChild, next, txt } from './dom/node'
 export {
@@ -68,7 +68,11 @@ export {
   getRestElement,
   getDefaultValue,
 } from './apiCreateFor'
-export { createTemplateRefSetter } from './apiTemplateRef'
+export {
+  createTemplateRefSetter,
+  setStaticTemplateRef,
+  setTemplateRefBinding,
+} from './apiTemplateRef'
 export { useVaporCssVars } from './helpers/useCssVars'
 export { setBlockKey } from './helpers/setKey'
 export { createDynamicComponent } from './apiCreateDynamicComponent'

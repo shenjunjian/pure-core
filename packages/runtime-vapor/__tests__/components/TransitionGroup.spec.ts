@@ -1,14 +1,14 @@
 import {
   VaporTransitionGroup,
   createComponent,
+  createFor,
   createIf,
   defineVaporAsyncComponent,
   defineVaporComponent,
   setBlockKey,
   template,
-  withVaporCtx,
 } from '../../src'
-import { nextTick } from '@vue/runtime-dom'
+import { nextTick, ref } from '@vue/runtime-dom'
 import { makeRender } from '../_utils'
 
 const define = makeRender()
@@ -29,7 +29,7 @@ describe('TransitionGroup', () => {
         setBlockKey(child, 'foo')
         child.block.$key = undefined
         return createComponent(VaporTransitionGroup, null, {
-          default: withVaporCtx(() => child),
+          default: () => child,
         })
       },
     }).render()
@@ -49,7 +49,7 @@ describe('TransitionGroup', () => {
         setBlockKey(frag, 'foo')
         frag.nodes.$key = undefined
         return createComponent(VaporTransitionGroup, null, {
-          default: withVaporCtx(() => frag),
+          default: () => frag,
         })
       },
     }).render()
@@ -76,7 +76,7 @@ describe('TransitionGroup', () => {
         child.block[0].$key = undefined
         child.block[1].$key = undefined
         return createComponent(VaporTransitionGroup, null, {
-          default: withVaporCtx(() => child),
+          default: () => child,
         })
       },
     }).render()
@@ -104,7 +104,7 @@ describe('TransitionGroup', () => {
         child = createComponent(Child)
         setBlockKey(child, 'foo')
         return createComponent(VaporTransitionGroup, null, {
-          default: withVaporCtx(() => child),
+          default: () => child,
         })
       },
     }).render()
@@ -135,7 +135,7 @@ describe('TransitionGroup', () => {
         child = createComponent(AsyncChild)
         setBlockKey(child, 'foo')
         return createComponent(VaporTransitionGroup, null, {
-          default: withVaporCtx(() => child),
+          default: () => child,
         })
       },
     }).render()
@@ -151,5 +151,29 @@ describe('TransitionGroup', () => {
     expect(child.block.nodes.$key).toBe('foo')
     expect(child.block.nodes.block.$key).toBe('foo')
     expect(child.block.nodes.block.$transition).toBeDefined()
+  })
+
+  test('inherits v-for item key when applying transition hooks to new items', async () => {
+    const items = ref([1])
+    let list: any
+
+    define({
+      setup() {
+        list = createFor(
+          () => items.value,
+          item => template(`<div></div>`)(),
+          item => item,
+        )
+        return createComponent(VaporTransitionGroup, null, {
+          default: () => list,
+        })
+      },
+    }).render()
+
+    items.value = [1, 2]
+    await nextTick()
+
+    expect(list.nodes[0][1].nodes.$key).toBe(2)
+    expect(list.nodes[0][1].nodes.$transition).toBeDefined()
   })
 })

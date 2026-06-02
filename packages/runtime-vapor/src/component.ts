@@ -71,19 +71,22 @@ import {
   normalizePropsOptions,
   resolveDynamicProps,
   setupPropsValidation,
+  snapshotRawProps,
 } from './componentProps'
 import { type RenderEffect, renderEffect } from './renderEffect'
 import { emit, normalizeEmitsOptions } from './componentEmits'
 import { setDynamicProps } from './dom/prop'
 import {
-  type DynamicSlotSource,
+  type LooseRawSlots,
   type RawSlots,
   type StaticSlots,
-  type VaporSlot,
   dynamicSlotsProxyHandlers,
   getScopeOwner,
   getSlot,
+  inOnceSlot,
+  normalizeRawSlots,
   setCurrentSlotOwner,
+  withOnceSlot,
 } from './componentSlots'
 import { hmrReload, hmrRerender } from './hmr'
 import {
@@ -135,7 +138,12 @@ import {
   isCollectingVdomSlotVNodes,
   isInteropEnabled,
 } from './vdomInteropState'
-import { setComponentScopeId, setScopeId } from './scopeId'
+import {
+  getCurrentScopeId,
+  setComponentScopeId,
+  setScopeId,
+  trackComponentScopeId,
+} from './scopeId'
 import { isTransitionEnabled, isVaporTransition } from './transition'
 
 export { currentInstance } from '@vue/runtime-dom'
@@ -240,10 +248,6 @@ export type LooseRawProps = Record<string, unknown> & {
   $?: DynamicPropsSource[]
 }
 
-export type LooseRawSlots = Record<string, VaporSlot | DynamicSlotSource[]> & {
-  $?: DynamicSlotSource[]
-}
-
 export function createComponent(
   component: VaporComponent,
   rawProps?: LooseRawProps | null,
@@ -255,6 +259,11 @@ export function createComponent(
     emptyContext,
   managedMount = false,
 ): VaporComponentInstance {
+  // A component created while rendering a v-once slot should receive frozen
+  // parent inputs, but its own render effects should still be live.
+  const wasInOnceSlot = inOnceSlot
+  if (wasInOnceSlot) once = true
+
   if (isInteropEnabled && isCollectingVdomSlotVNodes) {
     if (component.__vapor) {
       // Vapor components cannot be represented as VDOM child metadata. Bail out
@@ -264,7 +273,6 @@ export function createComponent(
     const owner = getScopeOwner()
     if (owner) appContext = owner.appContext
   }
-
   const _insertionParent = insertionParent
   const _insertionAnchor = insertionAnchor
   let hydrationClose: Node | null = null
@@ -345,7 +353,8 @@ export function createComponent(
         component as any,
         currentInstance as any,
         rawProps,
-        rawSlots,
+        normalizeRawSlots(rawSlots),
+        once,
       )
       if (isCollectingVdomSlotVNodes) {
         // VDOM interop children already expose frag.vnode for collection. Do not
@@ -362,7 +371,7 @@ export function createComponent(
 
     // teleport
     if (isTeleportEnabled && isVaporTeleport(component)) {
-      const frag = component.process(rawProps!, rawSlots!)
+      const frag = component.process(rawProps!, normalizeRawSlots(rawSlots))
       if (_insertionParent) {
         // Teleports mounted via insertion state are not part of the returned
         // block tree, so scope disposal must tear down their target-side state.
@@ -380,7 +389,7 @@ export function createComponent(
     const instance = new VaporComponentInstance(
       component,
       rawProps as RawProps,
-      rawSlots as RawSlots,
+      rawSlots,
       appContext,
       once,
     )
@@ -428,11 +437,16 @@ export function createComponent(
         component.__asyncHydrate &&
         !component.__asyncResolved
       ) {
+        const setup = () => setupComponent(instance, component)
         component.__asyncHydrate(
           currentHydrationNode as Element,
           instance,
-          () => setupComponent(instance, component),
+          // Async hydration re-enters setup later, so preserve the component
+          // boundary rule above when the delayed setup actually runs.
+          wasInOnceSlot ? () => withOnceSlot(setup, false) : setup,
         )
+      } else if (wasInOnceSlot) {
+        withOnceSlot(() => setupComponent(instance, component), false)
       } else {
         setupComponent(instance, component)
       }
@@ -706,6 +720,7 @@ export class VaporComponentInstance<
   // for v-once: caches props/attrs values to ensure they remain frozen
   // even when the component re-renders due to local state changes
   oncePropsCache?: Record<string | symbol, any>
+  isOnce: boolean
 
   // lifecycle hooks
   isMounted: boolean
@@ -755,7 +770,7 @@ export class VaporComponentInstance<
   constructor(
     comp: VaporComponent,
     rawProps?: RawProps | null,
-    rawSlots?: RawSlots | null,
+    rawSlots?: LooseRawSlots | null,
     appContext?: GenericAppContext,
     once?: boolean,
   ) {
@@ -778,6 +793,7 @@ export class VaporComponentInstance<
 
     this.block = null! // to be set
     this.scope = new EffectScope(true)
+    this.isOnce = !!once
 
     this.emit = emit.bind(null, this) as EmitFn<Emits>
     this.expose = expose.bind(null, this) as any
@@ -801,10 +817,15 @@ export class VaporComponentInstance<
         false
 
     // init props
-    this.rawProps = rawProps || EMPTY_OBJ
-    this.hasFallthrough = hasFallthroughAttrs(comp, rawProps)
+    // Snapshot raw parent inputs before creating proxies so delayed reads from
+    // v-once children cannot observe later parent updates.
+    this.rawProps =
+      this.isOnce && rawProps
+        ? snapshotRawProps(rawProps)
+        : rawProps || EMPTY_OBJ
+    this.hasFallthrough = hasFallthroughAttrs(comp, this.rawProps)
     if (rawProps || comp.props) {
-      const [propsHandlers, attrsHandlers] = getPropsProxyHandlers(comp, once)
+      const [propsHandlers, attrsHandlers] = getPropsProxyHandlers(comp)
       this.attrs = new Proxy(this, attrsHandlers)
       this.props = (
         comp.props
@@ -818,12 +839,11 @@ export class VaporComponentInstance<
     }
 
     // init slots
-    this.rawSlots = rawSlots || EMPTY_OBJ
+    const normalizedRawSlots = normalizeRawSlots(rawSlots)
+    this.rawSlots = normalizedRawSlots || EMPTY_OBJ
     this.slots = (
-      rawSlots
-        ? rawSlots.$
-          ? new Proxy(rawSlots, dynamicSlotsProxyHandlers)
-          : rawSlots
+      normalizedRawSlots
+        ? new Proxy(normalizedRawSlots, dynamicSlotsProxyHandlers)
         : EMPTY_OBJ
     ) as Slots
 
@@ -956,6 +976,7 @@ export function createPlainElement(
   isSingleRoot?: boolean,
   once?: boolean,
 ): HTMLElement {
+  rawSlots = normalizeRawSlots(rawSlots)
   const _insertionParent = insertionParent
   const _insertionAnchor = insertionAnchor
   let hydrationCursor: HydrationCursor | null = null
@@ -1099,6 +1120,10 @@ export function mountComponent(
   if (!isHydrating) {
     insert(instance.block, parent, anchor)
     setComponentScopeId(instance)
+  } else {
+    // Hydrated roots already have SSR scope attrs. Track dynamic roots so
+    // client-only branch switches keep inherited scope ids.
+    trackComponentScopeId(instance)
   }
   if (instance.m) queuePostFlushCb(instance.m!)
   if (
@@ -1259,32 +1284,14 @@ function handleSetupResult(
     component.inheritAttrs !== false &&
     Object.keys(instance.attrs).length
   ) {
-    const root = getRootElement(
-      instance.block,
-      // attach attrs to root dynamic fragments for applying during each update
-      frag => (frag.attrs = instance.attrs),
-      false,
-    )
-    if (root) {
-      renderEffect(() => {
-        const attrs =
-          isFunction(component) &&
-          !(isTransitionEnabled ? isVaporTransition(component) : false)
-            ? getFunctionalFallthrough(instance.attrs)
-            : instance.attrs
-        if (attrs) applyFallthroughProps(root, attrs)
-      })
-    } else if (
-      __DEV__ &&
-      ((!instance.accessedAttrs &&
-        isArray(instance.block) &&
-        instance.block.length) ||
-        // preventing attrs fallthrough on Teleport
-        // consistent with VDOM Teleport behavior
-        (isTeleportEnabled && isTeleportFragment(instance.block)))
-    ) {
-      warnExtraneousAttributes(instance.attrs)
-    }
+    const getFallthroughAttrs =
+      isFunction(component) &&
+      !(isTransitionEnabled ? isVaporTransition(component) : false)
+        ? () => getFunctionalFallthrough(instance.attrs)
+        : () => instance.attrs
+    // attach attrs to the root element, or to root dynamic fragments so they
+    // can be (re-)applied during each branch update
+    applyFallthroughAttrs(instance.block, instance, getFallthroughAttrs)
   }
 
   if (__DEV__) {
@@ -1292,7 +1299,132 @@ function handleSetupResult(
   }
 }
 
-export function getCurrentScopeId(): string | undefined {
-  const scopeOwner = getScopeOwner()
-  return scopeOwner ? scopeOwner.type.__scopeId : undefined
+// Attach fallthrough attrs to the single root element. When the root is a
+// dynamic fragment (e.g. v-if), the attrs are (re-)applied on each branch
+// update via its insert hook. Slots and teleports warn instead of receiving
+// the attrs, consistent with VDOM behavior.
+function applyFallthroughAttrs(
+  block: Block,
+  instance: VaporComponentInstance,
+  getFallthroughAttrs: () => Record<string, any> | undefined,
+  scope?: EffectScope,
+): void {
+  let hasSlotFragment = false
+  let dynamicFragments: DynamicFragment[] | undefined
+  const root = getRootElement(
+    block,
+    frag => {
+      if (frag.isSlot) {
+        hasSlotFragment = true
+      } else {
+        ;(dynamicFragments ||= []).push(frag)
+      }
+    },
+    false,
+  )
+
+  const dynamicRoot = root ? undefined : getSingleDynamicRootChain(block)
+  const fragmentsToRegister = root
+    ? dynamicFragments
+    : dynamicRoot && dynamicRoot.fragments
+  if (fragmentsToRegister) {
+    for (const frag of fragmentsToRegister) {
+      // slot fragments warn instead of inheriting attrs, skip them
+      if (!frag.isSlot) {
+        // Nested dynamic fragments need their own fallthrough hook.
+        registerDynamicFragmentFallthroughAttrs(
+          frag,
+          instance,
+          getFallthroughAttrs,
+        )
+      }
+    }
+  }
+
+  if (root && !hasSlotFragment) {
+    const applyEffect = () =>
+      renderEffect(() => {
+        const attrs = getFallthroughAttrs()
+        if (attrs) applyFallthroughProps(root, attrs)
+      })
+    // ensure the render effect is cleaned up when the branch scope is stopped
+    scope ? scope.run(applyEffect) : applyEffect()
+  } else if (
+    __DEV__ &&
+    (hasSlotFragment ||
+      (dynamicRoot && dynamicRoot.hasNonSingleRoot) ||
+      (isTeleportEnabled && containsTeleportFragment(block)) ||
+      (!instance.accessedAttrs && isArray(block) && block.length))
+  ) {
+    warnExtraneousAttributes(instance.attrs)
+  }
+}
+
+interface DynamicRootChain {
+  fragments: DynamicFragment[]
+  hasNonSingleRoot: boolean
+}
+
+// Resolve the chain of dynamic fragments leading to a single root candidate.
+// Used when getRootElement finds no element root, so fallthrough attrs are
+// registered only for true single-root components rather than for any dynamic
+// fragment seen during traversal. Dynamic root branches that are currently
+// non-single-root still keep the outer fragment hook for future branch updates,
+// but report hasNonSingleRoot so the current render can warn.
+function getSingleDynamicRootChain(block: Block): DynamicRootChain | undefined {
+  if (block instanceof DynamicFragment) {
+    const { nodes } = block
+    const nested = getSingleDynamicRootChain(nodes)
+    return {
+      fragments: nested ? [block, ...nested.fragments] : [block],
+      hasNonSingleRoot: nested
+        ? nested.hasNonSingleRoot
+        : isArray(nodes) && nodes.some(child => !(child instanceof Comment)),
+    }
+  }
+
+  if (isFragment(block) && !(isTeleportEnabled && isTeleportFragment(block))) {
+    return getSingleDynamicRootChain(block.nodes)
+  }
+
+  if (isArray(block)) {
+    let singleRoot: DynamicRootChain | undefined
+    let hasComment = false
+    for (const child of block) {
+      if (child instanceof Comment) {
+        hasComment = true
+        continue
+      }
+      const childRoot = getSingleDynamicRootChain(child)
+      if (!childRoot || singleRoot) {
+        return
+      }
+      singleRoot = childRoot
+    }
+    return hasComment ? singleRoot : undefined
+  }
+}
+
+function containsTeleportFragment(block: Block): boolean {
+  if (isTeleportFragment(block)) return true
+  if (isArray(block)) {
+    return block.some(
+      child => !(child instanceof Comment) && containsTeleportFragment(child),
+    )
+  }
+  return isFragment(block) && containsTeleportFragment(block.nodes)
+}
+
+function registerDynamicFragmentFallthroughAttrs(
+  frag: DynamicFragment,
+  instance: VaporComponentInstance,
+  getFallthroughAttrs: () => Record<string, any> | undefined,
+): void {
+  // avoid registering duplicate hooks
+  if (frag.hasFallthroughAttrs) return
+
+  frag.hasFallthroughAttrs = true
+  ;(frag.onBeforeInsert ||= []).push(nodes =>
+    applyFallthroughAttrs(nodes, instance, getFallthroughAttrs, frag.scope!),
+  )
 }

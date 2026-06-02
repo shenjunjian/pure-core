@@ -1,8 +1,10 @@
 import {
+  VaporKeepAlive,
   VaporTransition,
   child,
   createComponent,
   createIf,
+  defineVaporComponent,
   insert,
   renderEffect,
   template,
@@ -10,13 +12,20 @@ import {
   withDirectives,
 } from '../src'
 import { nextTick, ref } from '@vue/runtime-dom'
+import { VaporBlockShape, VaporIfFlags } from '@vue/shared'
 import type { Mock } from 'vitest'
-import { makeRender } from './_utils'
+import { ifFlags, makeRender } from './_utils'
 import { unmountComponent } from '../src/component'
 import { setElementText } from '../src/dom/prop'
 import type { DynamicFragment } from '../src/fragment'
 
 const define = makeRender()
+const singleRootIfElse =
+  VaporBlockShape.SINGLE_ROOT | (VaporBlockShape.SINGLE_ROOT << 2)
+const singleRootNoScope =
+  VaporBlockShape.SINGLE_ROOT | VaporIfFlags.TRUE_NO_SCOPE
+const singleRootNoScopeIfElse =
+  singleRootIfElse | VaporIfFlags.TRUE_NO_SCOPE | VaporIfFlags.FALSE_NO_SCOPE
 
 describe('createIf', () => {
   test('basic', async () => {
@@ -145,8 +154,7 @@ describe('createIf', () => {
           () => toggle.value,
           () => template('<p>foo</p>')(),
           () => template('<p>bar</p>')(),
-          undefined,
-          true,
+          ifFlags(singleRootIfElse, true),
         )
       },
     }).render()
@@ -187,6 +195,217 @@ describe('createIf', () => {
     expect(onUpdated).toHaveBeenCalledTimes(2)
   })
 
+  test('should skip branch scope for compiler-proven static single-root branch', async () => {
+    const show = ref(true)
+    const t0 = template('<div>foo</div>')
+    let frag!: DynamicFragment
+
+    const { host } = define(() => {
+      frag = createIf(
+        () => show.value,
+        () => t0(),
+        undefined,
+        singleRootNoScope,
+      ) as DynamicFragment
+      return frag
+    }).render()
+
+    expect(host.innerHTML).toBe('<div>foo</div><!--if-->')
+    expect(frag.scope).toBeUndefined()
+
+    show.value = false
+    await nextTick()
+    expect(host.innerHTML).toBe('<!--if-->')
+    expect(frag.scope).toBeUndefined()
+
+    show.value = true
+    await nextTick()
+    expect(host.innerHTML).toBe('<div>foo</div><!--if-->')
+    expect(frag.scope).toBeUndefined()
+  })
+
+  test('should keep branch scope for no-scope branch with fallthrough attrs', async () => {
+    const show = ref(true)
+    const id = ref('a')
+    const t0 = template('<div>foo</div>')
+    let frag!: DynamicFragment
+    const Child = defineVaporComponent({
+      setup() {
+        return (frag = createIf(
+          () => show.value,
+          () => t0(),
+          undefined,
+          singleRootNoScope,
+        ) as DynamicFragment)
+      },
+    })
+
+    const { host } = define(() =>
+      createComponent(Child, { id: () => id.value }, null, true),
+    ).render()
+
+    expect(host.innerHTML).toBe('<div id="a">foo</div><!--if-->')
+    expect(frag.scope).toBeUndefined()
+    expect((frag as any).attrs).toBeUndefined()
+    expect((frag as any).hasFallthroughAttrs).toBe(true)
+
+    id.value = 'b'
+    await nextTick()
+    expect(host.innerHTML).toBe('<div id="b">foo</div><!--if-->')
+
+    show.value = false
+    await nextTick()
+    expect(host.innerHTML).toBe('<!--if-->')
+
+    show.value = true
+    await nextTick()
+    expect(host.innerHTML).toBe('<div id="b">foo</div><!--if-->')
+    expect(frag.scope).toBeDefined()
+  })
+
+  test('should skip branch scope for compiler-proven static multi-root branch', async () => {
+    const show = ref(true)
+    const t0 = template('<div>foo</div>')
+    const t1 = template('<p>bar</p>')
+    let frag!: DynamicFragment
+
+    const { host } = define(() => {
+      frag = createIf(
+        () => show.value,
+        () => [t0(), t1()],
+        undefined,
+        VaporBlockShape.MULTI_ROOT | VaporIfFlags.TRUE_NO_SCOPE,
+      ) as DynamicFragment
+      return frag
+    }).render()
+
+    expect(host.innerHTML).toBe('<div>foo</div><p>bar</p><!--if-->')
+    expect(frag.scope).toBeUndefined()
+
+    show.value = false
+    await nextTick()
+    expect(host.innerHTML).toBe('<!--if-->')
+    expect(frag.scope).toBeUndefined()
+  })
+
+  test('should replace no-scope static if and else branches', async () => {
+    const show = ref(true)
+    const t0 = template('<div>foo</div>')
+    const t1 = template('<p>bar</p>')
+    let frag!: DynamicFragment
+
+    const { host } = define(() => {
+      frag = createIf(
+        () => show.value,
+        () => t0(),
+        () => t1(),
+        singleRootNoScopeIfElse,
+      ) as DynamicFragment
+      return frag
+    }).render()
+
+    expect(host.innerHTML).toBe('<div>foo</div><!--if-->')
+    expect(frag.scope).toBeUndefined()
+
+    show.value = false
+    await nextTick()
+    expect(host.innerHTML).toBe('<p>bar</p><!--if-->')
+    expect(frag.scope).toBeUndefined()
+  })
+
+  test('should preserve no-scope pending branch during out-in transition', async () => {
+    const show = ref(true)
+    const onLeave = vi.fn((_: Element, done: () => void) => setTimeout(done, 0))
+    const t0 = template('<div>foo</div>')
+    const t1 = template('<p>bar</p>')
+    let frag!: DynamicFragment
+
+    const { host } = define(() =>
+      createComponent(
+        VaporTransition,
+        { mode: () => 'out-in', onLeave: () => onLeave },
+        {
+          default: () =>
+            (frag = createIf(
+              () => show.value,
+              () => t0(),
+              () => t1(),
+              ifFlags(singleRootNoScopeIfElse, false, 0),
+            ) as DynamicFragment),
+        },
+        true,
+      ),
+    ).render()
+
+    expect(host.innerHTML).toBe('<div>foo</div><!--if-->')
+    expect(frag.scope).toBeUndefined()
+
+    show.value = false
+    await nextTick()
+    expect(host.textContent).toContain('foo')
+    expect(host.textContent).not.toContain('bar')
+    expect(onLeave).toHaveBeenCalledTimes(1)
+
+    await new Promise(r => setTimeout(r, 0))
+    await nextTick()
+    expect(host.innerHTML).toContain('bar')
+    expect(host.innerHTML).not.toContain('foo')
+    expect(frag.scope).toBeUndefined()
+  })
+
+  test('should skip no-scope static branch under KeepAlive', async () => {
+    const show = ref(false)
+    const childSetup = vi.fn()
+    const t0 = template('<p>static</p>')
+    const t1 = template('<div>child</div>')
+    const Child = defineVaporComponent({
+      name: 'Child',
+      setup() {
+        childSetup()
+        return t1()
+      },
+    })
+    let frag!: DynamicFragment
+    const flags = ifFlags(
+      singleRootIfElse | VaporIfFlags.FALSE_NO_SCOPE,
+      false,
+      0,
+    )
+
+    const { host } = define(() =>
+      createComponent(VaporKeepAlive, null, {
+        default: () =>
+          (frag = createIf(
+            () => show.value,
+            () => createComponent(Child),
+            () => t0(),
+            flags,
+          ) as DynamicFragment),
+      }),
+    ).render()
+
+    expect(host.innerHTML).toBe('<p>static</p><!--if-->')
+    expect(frag.scope).toBeUndefined()
+
+    show.value = true
+    await nextTick()
+    expect(host.innerHTML).toBe('<div>child</div><!--if-->')
+    expect(frag.scope).toBeDefined()
+    expect(childSetup).toHaveBeenCalledTimes(1)
+    const componentScope = frag.scope
+
+    show.value = false
+    await nextTick()
+    expect(host.innerHTML).toBe('<p>static</p><!--if-->')
+    expect(frag.scope).toBeUndefined()
+
+    show.value = true
+    await nextTick()
+    expect(host.innerHTML).toBe('<div>child</div><!--if-->')
+    expect(frag.scope).toBe(componentScope)
+    expect(childSetup).toHaveBeenCalledTimes(1)
+  })
+
   test('should not set branch block key without Transition or KeepAlive', async () => {
     const show = ref(true)
     const t0 = template('<div>foo</div>')
@@ -198,9 +417,7 @@ describe('createIf', () => {
         () => show.value,
         () => (branch = t0()),
         () => (branch = t1()),
-        undefined,
-        undefined,
-        0,
+        ifFlags(singleRootIfElse, false, 0),
       ),
     ).render()
 
@@ -234,9 +451,7 @@ describe('createIf', () => {
         () => show.value,
         () => (branch = t0()),
         () => (branch = t1()),
-        undefined,
-        undefined,
-        0,
+        ifFlags(singleRootIfElse, false, 0),
       ),
     ]).render()
 
@@ -270,9 +485,7 @@ describe('createIf', () => {
               () => show.value,
               () => (branch = t0()),
               () => (branch = t1()),
-              undefined,
-              undefined,
-              0,
+              ifFlags(singleRootIfElse, false, 0),
             ),
         },
         true,

@@ -14,8 +14,9 @@ import {
   vModelText,
   withDirectives,
 } from 'vue'
+import { VaporBlockShape, VaporVForFlags } from '@vue/shared'
 import type { LooseRawProps, VaporComponent } from '../../src/component'
-import { makeRender } from '../_utils'
+import { ifFlags, makeRender } from '../_utils'
 import { VaporKeepAlive } from '../../src/components/KeepAlive'
 import {
   child,
@@ -34,11 +35,12 @@ import {
   setText,
   template,
   vaporInteropPlugin,
-  withVaporCtx,
 } from '../../src'
 
 const define = makeRender()
 const timeout = (n: number = 0) => new Promise(r => setTimeout(r, n))
+const singleRootIfElse =
+  VaporBlockShape.SINGLE_ROOT | (VaporBlockShape.SINGLE_ROOT << 2)
 
 describe('VaporKeepAlive', () => {
   let one: VaporComponent
@@ -249,9 +251,7 @@ describe('VaporKeepAlive', () => {
                 setRefB(n1, instanceB)
                 return n1
               },
-              undefined,
-              undefined,
-              0,
+              ifFlags(singleRootIfElse, false, 0),
             ),
         })
       },
@@ -284,10 +284,10 @@ describe('VaporKeepAlive', () => {
     const Comp = defineVaporComponent({
       setup() {
         return createComponent(VaporKeepAlive, null, {
-          default: withVaporCtx(() => {
+          default: () => {
             const n0 = createSlot('default', null)
             return n0
-          }),
+          },
         })
       },
     })
@@ -310,9 +310,7 @@ describe('VaporKeepAlive', () => {
                 setRefB(n1, instanceB)
                 return n1
               },
-              undefined,
-              undefined,
-              0,
+              ifFlags(singleRootIfElse, false, 0),
             ),
         })
       },
@@ -416,7 +414,7 @@ describe('VaporKeepAlive', () => {
     const ReusableKeepAlive = defineVaporComponent({
       setup() {
         return createComponent(VaporKeepAlive, null, {
-          default: withVaporCtx(() => createSlot('default', null)),
+          default: () => createSlot('default', null),
         })
       },
     })
@@ -433,6 +431,7 @@ describe('VaporKeepAlive', () => {
               return n0
             },
             item => item,
+            VaporVForFlags.SLOT_ROOT,
           ),
       })
 
@@ -444,9 +443,7 @@ describe('VaporKeepAlive', () => {
               () => toggle.value,
               () => renderItems(itemsA),
               () => renderItems(itemsB),
-              undefined,
-              undefined,
-              0,
+              ifFlags(singleRootIfElse, false, 0),
             ),
         })
       },
@@ -476,9 +473,7 @@ describe('VaporKeepAlive', () => {
 
     toggle.value = true
     await nextTick()
-    expect(html()).toBe(
-      '<div>fallback</div><!--for--><!--slot--><!--if--><!--slot-->',
-    )
+    expect(html()).toBe('<div>fallback</div><!--slot--><!--if--><!--slot-->')
 
     itemsA.value = [3]
     await nextTick()
@@ -2519,9 +2514,7 @@ describe('VaporKeepAlive', () => {
                 () => toggle.value,
                 () => createComponent(Comp, { id: () => 'a' }),
                 () => createComponent(Comp, { id: () => 'b' }),
-                undefined,
-                undefined,
-                0,
+                ifFlags(singleRootIfElse, false, 0),
               ),
           },
         )
@@ -2607,9 +2600,7 @@ describe('VaporKeepAlive', () => {
                   () => toggle.value,
                   () => createComponent(Comp, { id: () => 'a' }),
                   () => createComponent(Comp, { id: () => 'b' }),
-                  undefined,
-                  undefined,
-                  0,
+                  ifFlags(singleRootIfElse, false, 0),
                 ),
             })
             return keepAlive
@@ -2676,9 +2667,7 @@ describe('VaporKeepAlive', () => {
                   () => toggle.value,
                   () => createComponent(Comp, { id: () => 'a' }),
                   () => createComponent(AsyncComp),
-                  undefined,
-                  undefined,
-                  0,
+                  ifFlags(singleRootIfElse, false, 0),
                 ),
             })
             return keepAlive
@@ -2724,9 +2713,7 @@ describe('VaporKeepAlive', () => {
                 () => toggle.value,
                 () => createComponent(Comp, { id: () => 'a' }),
                 () => createComponent(Comp, { id: () => 'b' }),
-                undefined,
-                undefined,
-                0,
+                ifFlags(singleRootIfElse, false, 0),
               ),
           },
         )
@@ -2775,9 +2762,7 @@ describe('VaporKeepAlive', () => {
               () => toggle.value,
               () => createComponent(Comp, { id: () => 'a' }),
               () => createComponent(Comp, { id: () => 'b' }),
-              undefined,
-              undefined,
-              0,
+              ifFlags(singleRootIfElse, false, 0),
             ),
         })
       },

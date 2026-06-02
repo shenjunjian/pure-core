@@ -1,18 +1,48 @@
-import { createApp, h, nextTick, ref } from '@vue/runtime-dom'
 import {
+  createApp,
+  h,
+  nextTick,
+  onUpdated,
+  ref,
+  renderSlot,
+} from '@vue/runtime-dom'
+import { VaporDynamicComponentFlags, VaporSlotFlags } from '@vue/shared'
+import { BindingTypes } from '@vue/compiler-dom'
+import {
+  VaporTeleport,
+  VaporTransition,
   createComponent,
   createDynamicComponent,
   createFor,
+  createIf,
   createSlot,
+  defineVaporAsyncComponent,
   defineVaporComponent,
+  renderEffect,
+  setElementText,
   setInsertionState,
   template,
   vaporInteropPlugin,
-  withVaporCtx,
 } from '../src'
-import { makeRender } from './_utils'
+import { compile, compileToVaporRender, makeRender } from './_utils'
 
 const define = makeRender()
+const slottedScopeProbeConnections = ((
+  globalThis as any
+).__slottedScopeProbeConnections ||= []) as boolean[]
+
+function defineSlottedScopeProbe() {
+  if (!customElements.get('slotted-scope-probe')) {
+    customElements.define(
+      'slotted-scope-probe',
+      class extends HTMLElement {
+        connectedCallback() {
+          slottedScopeProbeConnections.push(this.hasAttribute('child-s'))
+        }
+      },
+    )
+  }
+}
 
 describe('scopeId', () => {
   test('should attach scopeId to child component', () => {
@@ -30,6 +60,39 @@ describe('scopeId', () => {
       },
     }).render()
     expect(html()).toBe(`<div child="" parent=""></div>`)
+  })
+
+  test('should attach scopeId to updated dynamic child component root', async () => {
+    const showAlt = ref(false)
+    const Child = defineVaporComponent({
+      __scopeId: 'child',
+      render: compileToVaporRender(
+        `<section v-if="showAlt">alt</section><div v-else>base</div>`,
+        {
+          bindingMetadata: {
+            showAlt: BindingTypes.SETUP_REF,
+          },
+          scopeId: 'child',
+        },
+      ),
+      setup() {
+        return { showAlt }
+      },
+    })
+
+    const { html } = define({
+      __scopeId: 'parent',
+      setup() {
+        return createComponent(Child)
+      },
+    }).render()
+
+    expect(html()).toBe(`<div child="" parent="">base</div><!--if-->`)
+
+    showAlt.value = true
+    await nextTick()
+
+    expect(html()).toBe(`<section child="" parent="">alt</section><!--if-->`)
   })
 
   test('should attach scopeId to child component with insertion state', () => {
@@ -163,7 +226,12 @@ describe('scopeId', () => {
     const Comp = defineVaporComponent({
       __scopeId: 'child',
       setup() {
-        return createDynamicComponent(() => 'button', null, null, true)
+        return createDynamicComponent(
+          () => 'button',
+          null,
+          null,
+          VaporDynamicComponentFlags.SINGLE_ROOT,
+        )
       },
     })
     const { html } = define({
@@ -181,7 +249,12 @@ describe('scopeId', () => {
     const Comp = defineVaporComponent({
       __scopeId: 'child',
       setup() {
-        return createDynamicComponent(() => 'button', null, null, true)
+        return createDynamicComponent(
+          () => 'button',
+          null,
+          null,
+          VaporDynamicComponentFlags.SINGLE_ROOT,
+        )
       },
     })
     const { html } = define({
@@ -227,11 +300,11 @@ describe('scopeId', () => {
           Child,
           null,
           {
-            default: withVaporCtx(() => {
+            default: () => {
               const n0 = template('<div parent></div>')()
               const n1 = createComponent(Child2)
               return [n0, n1]
-            }),
+            },
           },
           true,
         )
@@ -262,7 +335,7 @@ describe('scopeId', () => {
         // <div><slot/></div>
         const n1 = template('<div wrapper></div>', 1)() as any
         setInsertionState(n1)
-        createSlot('default', null, undefined, true /* noSlotted */)
+        createSlot('default', null, undefined, VaporSlotFlags.NO_SLOTTED)
         return n1
       },
     })
@@ -275,10 +348,10 @@ describe('scopeId', () => {
           Wrapper,
           null,
           {
-            default: withVaporCtx(() => {
+            default: () => {
               const n0 = createSlot('default', null)
               return n0
-            }),
+            },
           },
           true,
         )
@@ -312,6 +385,233 @@ describe('scopeId', () => {
     )
   })
 
+  test(':slotted on dynamic slot outlet update', async () => {
+    const data = ref({ slotName: 'one' })
+    const Child = compile(
+      `<template><slot :name="data.slotName" /></template>`,
+      data,
+    )
+    Child.__scopeId = 'child'
+
+    const Parent = compile(
+      `<template>
+        <components.Child>
+          <template #one><div>one</div></template>
+          <template #two><section>two</section></template>
+        </components.Child>
+      </template>`,
+      data,
+      { Child },
+    )
+
+    const { html } = define(Parent).render()
+
+    expect(html()).toBe(`<div child-s="">one</div><!--slot-->`)
+
+    data.value = { slotName: 'two' }
+    await nextTick()
+
+    expect(html()).toBe(`<section child-s="">two</section><!--slot-->`)
+  })
+
+  test(':slotted on v-for content added after mount', async () => {
+    const count = ref(0)
+    const Child = compile(`<template><slot /></template>`, count)
+    Child.__scopeId = 'child'
+
+    const Parent = compile(
+      `<template>
+        <components.Child>
+          <div v-for="i in data">item</div>
+        </components.Child>
+      </template>`,
+      count,
+      { Child },
+    )
+
+    const { html } = define(Parent).render()
+
+    expect(html()).toBe(`<!--for--><!--slot-->`)
+
+    count.value++
+    await nextTick()
+
+    expect(html()).toBe(`<div child-s="">item</div><!--for--><!--slot-->`)
+
+    count.value++
+    await nextTick()
+
+    expect(html()).toBe(
+      `<div child-s="">item</div><div child-s="">item</div><!--for--><!--slot-->`,
+    )
+  })
+
+  test(':slotted on v-for content applies scope id before insertion', async () => {
+    defineSlottedScopeProbe()
+    slottedScopeProbeConnections.length = 0
+
+    const count = ref(0)
+    const Child = defineVaporComponent({
+      __scopeId: 'child',
+      setup() {
+        return createSlot('default')
+      },
+    })
+
+    const { html } = define({
+      setup() {
+        return createComponent(
+          Child,
+          null,
+          {
+            default: () =>
+              createFor(
+                () => count.value,
+                () =>
+                  template(
+                    '<slotted-scope-probe>item</slotted-scope-probe>',
+                    1,
+                  )(),
+              ),
+          },
+          true,
+        )
+      },
+    }).render()
+
+    count.value++
+    await nextTick()
+
+    expect(slottedScopeProbeConnections).toEqual([true])
+    expect(html()).toBe(
+      `<slotted-scope-probe child-s="">item</slotted-scope-probe><!--for--><!--slot-->`,
+    )
+  })
+
+  test(':slotted on v-for content inside v-if added after mount', async () => {
+    const data = ref({ show: false, count: 1 })
+    const Child = compile(`<template><slot /></template>`, data)
+    Child.__scopeId = 'child'
+
+    const Parent = compile(
+      `<template>
+        <components.Child>
+          <template v-if="data.show">
+            <div v-for="i in data.count">item</div>
+          </template>
+        </components.Child>
+      </template>`,
+      data,
+      { Child },
+    )
+
+    const { html } = define(Parent).render()
+
+    expect(html()).toBe(`<!--if--><!--slot-->`)
+
+    data.value = { show: true, count: 1 }
+    await nextTick()
+
+    expect(html()).toBe(
+      `<div child-s="">item</div><!--for--><!--if--><!--slot-->`,
+    )
+
+    data.value = { show: true, count: 2 }
+    await nextTick()
+
+    expect(html()).toBe(
+      `<div child-s="">item</div><div child-s="">item</div><!--for--><!--if--><!--slot-->`,
+    )
+  })
+
+  test(':slotted on teleported content added after mount', async () => {
+    const target = document.createElement('div')
+    document.body.appendChild(target)
+    const show = ref(false)
+
+    try {
+      const Child = defineVaporComponent({
+        __scopeId: 'child',
+        setup() {
+          return createSlot('default')
+        },
+      })
+
+      const { html } = define({
+        setup() {
+          return createComponent(
+            Child,
+            null,
+            {
+              default: () =>
+                createComponent(
+                  VaporTeleport,
+                  { to: () => target },
+                  {
+                    default: () =>
+                      createIf(
+                        () => show.value,
+                        () => template('<div>item</div>')(),
+                      ),
+                  },
+                ),
+            },
+            true,
+          )
+        },
+      }).render()
+
+      expect(html()).toBe(`<!--teleport start--><!--teleport end--><!--slot-->`)
+      expect(target.innerHTML).toBe(`<!--if-->`)
+
+      show.value = true
+      await nextTick()
+
+      expect(target.innerHTML).toBe(`<div child-s="">item</div><!--if-->`)
+    } finally {
+      target.remove()
+    }
+  })
+
+  test(':slotted on initial teleported content', () => {
+    const target = document.createElement('div')
+    document.body.appendChild(target)
+
+    try {
+      const Child = defineVaporComponent({
+        __scopeId: 'child',
+        setup() {
+          return createSlot('default')
+        },
+      })
+
+      const { html } = define({
+        setup() {
+          return createComponent(
+            Child,
+            null,
+            {
+              default: () =>
+                createComponent(
+                  VaporTeleport,
+                  { to: () => target },
+                  {
+                    default: () => template('<div>item</div>')(),
+                  },
+                ),
+            },
+            true,
+          )
+        },
+      }).render()
+
+      expect(html()).toBe(`<!--teleport start--><!--teleport end--><!--slot-->`)
+      expect(target.innerHTML).toBe(`<div child-s="">item</div>`)
+    } finally {
+      target.remove()
+    }
+  })
+
   test('nested components with slots', async () => {
     const Child = defineVaporComponent({
       setup() {
@@ -328,12 +628,12 @@ describe('scopeId', () => {
           Child,
           null,
           {
-            default: withVaporCtx(() => {
+            default: () => {
               const n2 = createComponent(
                 Child,
                 null,
                 {
-                  default: withVaporCtx(() => {
+                  default: () => {
                     const n1 = createComponent(
                       Child,
                       null,
@@ -346,12 +646,12 @@ describe('scopeId', () => {
                       true,
                     )
                     return n1
-                  }),
+                  },
                 },
                 true,
               )
               return n2
-            }),
+            },
           },
           true,
         )
@@ -403,7 +703,7 @@ describe('scopeId', () => {
           Parent,
           null,
           {
-            default: withVaporCtx(() => {
+            default: () => {
               const n0 = createFor(
                 () => count.value,
                 _for_item0 => {
@@ -423,7 +723,7 @@ describe('scopeId', () => {
                 2,
               )
               return n0
-            }),
+            },
           },
           true,
         )
@@ -472,6 +772,588 @@ describe('vdom interop', () => {
 
     expect(root.innerHTML).toBe(
       `<button vapor-child="" vdom-parent=""></button>`,
+    )
+  })
+
+  test('vdom parent > vapor child with updated dynamic root', async () => {
+    const useAltRoot = ref(false)
+    const updatedSpy = vi.fn((vnode: any) => {
+      expect((vnode.el as Element).hasAttribute('vdom-parent')).toBe(true)
+    })
+
+    const VaporChild = defineVaporComponent({
+      __scopeId: 'vapor-child',
+      props: {
+        alt: Boolean,
+      },
+      setup(props: any) {
+        return createIf(
+          () => props.alt,
+          () => template('<section>alt</section>', 1)(),
+          () => template('<div>base</div>', 1)(),
+        )
+      },
+    })
+
+    const VdomParent = {
+      __scopeId: 'vdom-parent',
+      setup() {
+        return () =>
+          h(VaporChild as any, {
+            alt: useAltRoot.value,
+            onVnodeUpdated: updatedSpy,
+          })
+      },
+    }
+
+    const App = {
+      setup() {
+        return () => h(VdomParent)
+      },
+    }
+
+    const root = document.createElement('div')
+    createApp(App).use(vaporInteropPlugin).mount(root)
+
+    expect(root.innerHTML).toBe(`<div vdom-parent="">base</div><!--if-->`)
+
+    useAltRoot.value = true
+    await nextTick()
+
+    expect(root.innerHTML).toBe(
+      `<section vdom-parent="">alt</section><!--if-->`,
+    )
+    expect(updatedSpy).toHaveBeenCalledTimes(1)
+  })
+
+  test('vdom parent > vapor child with internally updated dynamic root', async () => {
+    const useAltRoot = ref(false)
+    const calls: string[] = []
+    let root!: HTMLDivElement
+
+    const VaporChild = defineVaporComponent({
+      __scopeId: 'vapor-child',
+      setup() {
+        onUpdated(() => {
+          const el = root.firstChild as Element
+          calls.push(`component:${el.hasAttribute('vdom-parent')}`)
+        })
+        return createIf(
+          () => useAltRoot.value,
+          () => template('<section>alt</section>', 1)(),
+          () => template('<div>base</div>', 1)(),
+        )
+      },
+    })
+
+    const VdomParent = {
+      __scopeId: 'vdom-parent',
+      setup() {
+        return () =>
+          h(VaporChild as any, {
+            onVnodeUpdated(vnode: any) {
+              calls.push(
+                `vnode:${(vnode.el as Element).hasAttribute('vdom-parent')}`,
+              )
+            },
+          })
+      },
+    }
+
+    const App = {
+      setup() {
+        return () => h(VdomParent)
+      },
+    }
+
+    root = document.createElement('div')
+    createApp(App).use(vaporInteropPlugin).mount(root)
+
+    useAltRoot.value = true
+    await nextTick()
+
+    expect(root.innerHTML).toBe(
+      `<section vdom-parent="">alt</section><!--if-->`,
+    )
+    expect(calls).toEqual(['component:true', 'vnode:true'])
+  })
+
+  test('vdom HOC parent > vapor child inherits scopeId on mount', () => {
+    const VaporChild = defineVaporComponent({
+      setup() {
+        return template('<button></button>', 1)()
+      },
+    })
+
+    function Child() {
+      return h(Child2, { class: 'foo' })
+    }
+
+    function Child2() {
+      return h(VaporChild as any)
+    }
+    Child2.inheritAttrs = false
+
+    const App = {
+      __scopeId: 'vdom-parent',
+      setup() {
+        return () => h(Child)
+      },
+    }
+
+    const root = document.createElement('div')
+    createApp(App).use(vaporInteropPlugin).mount(root)
+
+    expect(root.innerHTML).toBe(`<button vdom-parent=""></button>`)
+  })
+
+  test('vdom slot owner > vapor slot content applies slot scopeId', () => {
+    const VaporChild = defineVaporComponent({
+      setup() {
+        return template('<button></button>', 1)()
+      },
+    })
+
+    const VdomSlotOwner = {
+      __scopeId: 'vdom-slot-owner',
+      setup(_props: unknown, { slots }: any) {
+        return () => h('div', null, renderSlot(slots, 'default'))
+      },
+    }
+
+    const VdomParent = {
+      __scopeId: 'vdom-parent',
+      setup() {
+        return () =>
+          h(VdomSlotOwner, null, {
+            default: () => h(VaporChild as any),
+          })
+      },
+    }
+
+    const App = {
+      setup() {
+        return () => h(VdomParent)
+      },
+    }
+
+    const root = document.createElement('div')
+    createApp(App).use(vaporInteropPlugin).mount(root)
+
+    expect(root.innerHTML).toBe(
+      `<div vdom-slot-owner="" vdom-parent="">` +
+        `<button vdom-slot-owner="" vdom-parent="" vdom-slot-owner-s=""></button>` +
+        `</div>`,
+    )
+  })
+
+  test('vdom slot owner > vapor slot content preserves slot scopeIds on same root update', async () => {
+    function mount(initialNoSlotted: boolean) {
+      const noSlotted = ref(initialNoSlotted)
+      const count = ref(0)
+      const VaporChild = defineVaporComponent({
+        props: {
+          count: Number,
+        },
+        setup(props: any) {
+          const n0 = template('<button></button>', 1)()
+          renderEffect(() => setElementText(n0, props.count))
+          return n0
+        },
+      })
+
+      const VdomSlotOwner = {
+        __scopeId: 'vdom-slot-owner',
+        setup(_props: unknown, { slots }: any) {
+          return () =>
+            h(
+              'div',
+              null,
+              renderSlot(slots, 'default', {}, undefined, noSlotted.value),
+            )
+        },
+      }
+
+      const VdomParent = {
+        __scopeId: 'vdom-parent',
+        setup() {
+          return () =>
+            h(VdomSlotOwner, null, {
+              default: () => h(VaporChild as any, { count: count.value }),
+            })
+        },
+      }
+
+      const App = {
+        setup() {
+          return () => h(VdomParent)
+        },
+      }
+
+      const root = document.createElement('div')
+      createApp(App).use(vaporInteropPlugin).mount(root)
+      return { count, noSlotted, root }
+    }
+
+    const noSlottedRoot = mount(true)
+
+    expect(noSlottedRoot.root.innerHTML).toBe(
+      `<div vdom-slot-owner="" vdom-parent="">` +
+        `<button vdom-slot-owner="" vdom-parent="">0</button>` +
+        `</div>`,
+    )
+
+    noSlottedRoot.noSlotted.value = false
+    noSlottedRoot.count.value++
+    await nextTick()
+
+    expect(noSlottedRoot.root.innerHTML).toBe(
+      `<div vdom-slot-owner="" vdom-parent="">` +
+        `<button vdom-slot-owner="" vdom-parent="">1</button>` +
+        `</div>`,
+    )
+
+    const slottedRoot = mount(false)
+
+    expect(slottedRoot.root.innerHTML).toBe(
+      `<div vdom-slot-owner="" vdom-parent="">` +
+        `<button vdom-slot-owner="" vdom-parent="" vdom-slot-owner-s="">0</button>` +
+        `</div>`,
+    )
+
+    slottedRoot.noSlotted.value = true
+    slottedRoot.count.value++
+    await nextTick()
+
+    expect(slottedRoot.root.innerHTML).toBe(
+      `<div vdom-slot-owner="" vdom-parent="">` +
+        `<button vdom-slot-owner="" vdom-parent="" vdom-slot-owner-s="">1</button>` +
+        `</div>`,
+    )
+  })
+
+  test('vdom slot owner > vapor slot content preserves slot scopeIds on dynamic root update', async () => {
+    const showAlt = ref(false)
+    const VaporChild = defineVaporComponent({
+      setup() {
+        return createIf(
+          () => showAlt.value,
+          () => template('<span>alt</span>', 1)(),
+          () => template('<button>base</button>', 1)(),
+        )
+      },
+    })
+
+    const VdomSlotOwner = {
+      __scopeId: 'vdom-slot-owner',
+      setup(_props: unknown, { slots }: any) {
+        return () => h('div', null, renderSlot(slots, 'default'))
+      },
+    }
+
+    const VdomParent = {
+      __scopeId: 'vdom-parent',
+      setup() {
+        return () =>
+          h(VdomSlotOwner, null, {
+            default: () => h(VaporChild as any),
+          })
+      },
+    }
+
+    const App = {
+      setup() {
+        return () => h(VdomParent)
+      },
+    }
+
+    const root = document.createElement('div')
+    createApp(App).use(vaporInteropPlugin).mount(root)
+
+    expect(root.innerHTML).toBe(
+      `<div vdom-slot-owner="" vdom-parent="">` +
+        `<button vdom-slot-owner="" vdom-parent="" vdom-slot-owner-s="">base</button><!--if-->` +
+        `</div>`,
+    )
+
+    showAlt.value = true
+    await nextTick()
+
+    expect(root.innerHTML).toBe(
+      `<div vdom-slot-owner="" vdom-parent="">` +
+        `<span vdom-slot-owner="" vdom-parent="" vdom-slot-owner-s="">alt</span><!--if-->` +
+        `</div>`,
+    )
+  })
+
+  test('vdom slot owner > vapor v-if slot content added after mount', async () => {
+    const show = ref(false)
+    const VdomSlotOwner = {
+      __scopeId: 'vdom-slot-owner',
+      setup(_props: unknown, { slots }: any) {
+        return () => h('div', null, renderSlot(slots, 'default'))
+      },
+    }
+
+    const VaporParent = defineVaporComponent({
+      setup() {
+        return createComponent(
+          VdomSlotOwner as any,
+          null,
+          {
+            default: () =>
+              createIf(
+                () => show.value,
+                () => template('<button>item</button>', 1)(),
+              ),
+          },
+          true,
+        )
+      },
+    })
+
+    const App = {
+      setup() {
+        return () => h(VaporParent as any)
+      },
+    }
+
+    const root = document.createElement('div')
+    createApp(App).use(vaporInteropPlugin).mount(root)
+
+    expect(root.innerHTML).toBe(`<div vdom-slot-owner=""><!--if--></div>`)
+
+    show.value = true
+    await nextTick()
+
+    expect(root.innerHTML).toBe(
+      `<div vdom-slot-owner="">` +
+        `<button vdom-slot-owner-s="">item</button><!--if-->` +
+        `</div>`,
+    )
+  })
+
+  test('vdom slot owner > vapor v-if slot vdom child added after mount', async () => {
+    const show = ref(false)
+    const VdomChild = {
+      __scopeId: 'vdom-child',
+      setup() {
+        return () => h('button', 'item')
+      },
+    }
+    const VdomSlotOwner = {
+      __scopeId: 'vdom-slot-owner',
+      setup(_props: unknown, { slots }: any) {
+        return () => h('div', null, renderSlot(slots, 'default'))
+      },
+    }
+
+    const VaporParent = defineVaporComponent({
+      setup() {
+        return createComponent(
+          VdomSlotOwner as any,
+          null,
+          {
+            default: () =>
+              createIf(
+                () => show.value,
+                () => createComponent(VdomChild as any),
+              ),
+          },
+          true,
+        )
+      },
+    })
+
+    const App = {
+      setup() {
+        return () => h(VaporParent as any)
+      },
+    }
+
+    const root = document.createElement('div')
+    createApp(App).use(vaporInteropPlugin).mount(root)
+
+    expect(root.innerHTML).toBe(`<div vdom-slot-owner=""><!--if--></div>`)
+
+    show.value = true
+    await nextTick()
+
+    expect(root.innerHTML).toBe(
+      `<div vdom-slot-owner="">` +
+        `<button vdom-child="" vdom-slot-owner-s="">item</button><!--if-->` +
+        `</div>`,
+    )
+  })
+
+  test('vdom parent > vapor child with comment and single root', () => {
+    const VaporChild = defineVaporComponent({
+      setup() {
+        return [document.createComment('v-if'), template('<button></button>')()]
+      },
+    })
+
+    const VdomParent = {
+      __scopeId: 'vdom-parent',
+      setup() {
+        return () => h(VaporChild as any)
+      },
+    }
+
+    const App = {
+      setup() {
+        return () => h(VdomParent)
+      },
+    }
+
+    const root = document.createElement('div')
+    createApp(App).use(vaporInteropPlugin).mount(root)
+
+    expect(root.innerHTML).toBe(`<!--v-if--><button vdom-parent=""></button>`)
+  })
+
+  test('vdom parent > vapor child applies scopeId to out-in transition delayed root', async () => {
+    const show = ref(true)
+    const onLeave = vi.fn((_el: Element, done: () => void) => {
+      setTimeout(done, 0)
+    })
+    let interopVnode: any
+
+    const VaporChild = defineVaporComponent({
+      setup() {
+        return createComponent(
+          VaporTransition,
+          {
+            mode: () => 'out-in',
+            onLeave: () => onLeave,
+          },
+          {
+            default: () =>
+              createIf(
+                () => show.value,
+                () => template('<div>A</div>', 1)(),
+                () => template('<section>B</section>', 1)(),
+              ),
+          },
+        )
+      },
+    })
+
+    const VdomParent = {
+      __scopeId: 'vdom-parent',
+      setup() {
+        return () =>
+          h(VaporChild as any, {
+            onVnodeMounted(vnode: any) {
+              interopVnode = vnode
+            },
+          })
+      },
+    }
+
+    const App = {
+      setup() {
+        return () => h(VdomParent)
+      },
+    }
+
+    const root = document.createElement('div')
+    createApp(App).use(vaporInteropPlugin).mount(root)
+
+    expect(root.innerHTML).toBe(`<div vdom-parent="">A</div><!--if-->`)
+    expect(interopVnode.el).toBe(root.firstChild)
+
+    show.value = false
+    await nextTick()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    await nextTick()
+
+    expect(onLeave).toHaveBeenCalledTimes(1)
+    expect(root.innerHTML).toBe(
+      `<section class="v-enter-from v-enter-active" vdom-parent="">B</section><!--if-->`,
+    )
+    expect(interopVnode.el).toBe(root.firstChild)
+  })
+
+  test('vdom parent > vapor child with updated multi-root dynamic fragment', async () => {
+    const useMultiRoot = ref(false)
+
+    const VaporChild = defineVaporComponent({
+      setup() {
+        return createIf(
+          () => useMultiRoot.value,
+          () => [
+            template('<span>a</span>', 1)(),
+            template('<span>b</span>', 1)(),
+          ],
+          () => template('<div>base</div>', 1)(),
+        )
+      },
+    })
+
+    const VdomParent = {
+      __scopeId: 'vdom-parent',
+      setup() {
+        return () => h(VaporChild as any)
+      },
+    }
+
+    const App = {
+      setup() {
+        return () => h(VdomParent)
+      },
+    }
+
+    const root = document.createElement('div')
+    createApp(App).use(vaporInteropPlugin).mount(root)
+
+    expect(root.innerHTML).toBe(`<div vdom-parent="">base</div><!--if-->`)
+
+    useMultiRoot.value = true
+    await nextTick()
+
+    expect(root.innerHTML).toBe(`<span>a</span><span>b</span><!--if-->`)
+  })
+
+  test('vdom parent > async vapor child applies scopeId after resolve', async () => {
+    let resolve!: (component: any) => void
+    const VaporAsyncChild = defineVaporAsyncComponent({
+      loader: () =>
+        new Promise<any>(_resolve => {
+          resolve = _resolve
+        }),
+    })
+
+    const VdomParent = {
+      __scopeId: 'vdom-parent',
+      setup() {
+        return () => h(VaporAsyncChild as any)
+      },
+    }
+
+    const App = {
+      setup() {
+        return () => h(VdomParent)
+      },
+    }
+
+    const root = document.createElement('div')
+    createApp(App).use(vaporInteropPlugin).mount(root)
+
+    expect(root.innerHTML).toBe(`<!--async component-->`)
+
+    resolve(
+      defineVaporComponent({
+        setup() {
+          return template('<button>resolved</button>', 1)()
+        },
+      }),
+    )
+    await new Promise(resolve => setTimeout(resolve))
+    await nextTick()
+
+    expect(root.innerHTML).toBe(
+      `<button vdom-parent="">resolved</button><!--async component-->`,
     )
   })
 
@@ -558,7 +1440,12 @@ describe('vdom interop', () => {
     const VaporChild = defineVaporComponent({
       __scopeId: 'vapor-child',
       setup() {
-        return createDynamicComponent(() => 'button', null, null, true)
+        return createDynamicComponent(
+          () => 'button',
+          null,
+          null,
+          VaporDynamicComponentFlags.SINGLE_ROOT,
+        )
       },
     })
 
@@ -716,11 +1603,11 @@ describe('vdom interop', () => {
           VaporSlot,
           null,
           {
-            default: withVaporCtx(() => {
+            default: () => {
               const n0 = template('<div vapor-parent></div>')()
               const n1 = createComponent(VdomChild)
               return [n0, n1]
-            }),
+            },
           },
           true,
         )
@@ -741,6 +1628,66 @@ describe('vdom interop', () => {
       `<div vapor-slot="" vapor-parent="">` +
         `<div vapor-parent="" vapor-slot-s=""></div>` +
         `<span vdom-child="" vapor-parent="" vapor-slot-s=""></span>` +
+        `<!--slot-->` +
+        `</div>`,
+    )
+  })
+
+  test('vapor parent > vapor slot > vdom dynamic child', async () => {
+    const showAlt = ref(false)
+    const VaporSlot = defineVaporComponent({
+      __scopeId: 'vapor-slot',
+      setup() {
+        const n1 = template('<div vapor-slot></div>', 1)() as any
+        setInsertionState(n1)
+        createSlot('default', null)
+        return n1
+      },
+    })
+
+    const VdomChild = {
+      __scopeId: 'vdom-child',
+      setup() {
+        return () => (showAlt.value ? h('span', 'alt') : h('button', 'base'))
+      },
+    }
+
+    const VaporParent = defineVaporComponent({
+      __scopeId: 'vapor-parent',
+      setup() {
+        return createComponent(
+          VaporSlot,
+          null,
+          {
+            default: () => createComponent(VdomChild),
+          },
+          true,
+        )
+      },
+    })
+
+    const App = {
+      setup() {
+        return () => h(VaporParent as any)
+      },
+    }
+
+    const root = document.createElement('div')
+    createApp(App).use(vaporInteropPlugin).mount(root)
+
+    expect(root.innerHTML).toBe(
+      `<div vapor-slot="" vapor-parent="">` +
+        `<button vdom-child="" vapor-parent="" vapor-slot-s="">base</button>` +
+        `<!--slot-->` +
+        `</div>`,
+    )
+
+    showAlt.value = true
+    await nextTick()
+
+    expect(root.innerHTML).toBe(
+      `<div vapor-slot="" vapor-parent="">` +
+        `<span vdom-child="" vapor-parent="" vapor-slot-s="">alt</span>` +
         `<!--slot-->` +
         `</div>`,
     )

@@ -1,6 +1,12 @@
 import { ref, shallowRef } from '@vue/reactivity'
-import { nextTick, resolveDynamicComponent } from '@vue/runtime-dom'
 import {
+  currentInstance,
+  nextTick,
+  resolveDynamicComponent,
+} from '@vue/runtime-dom'
+import { VaporDynamicComponentFlags } from '@vue/shared'
+import {
+  type VaporComponentInstance,
   createComponent,
   createComponentWithFallback,
   createDynamicComponent,
@@ -12,7 +18,6 @@ import {
   setHtml,
   setInsertionState,
   template,
-  withVaporCtx,
 } from '../src'
 import { makeRender } from './_utils'
 
@@ -73,7 +78,13 @@ describe('api: createDynamicComponent', () => {
 
     const { html } = define({
       setup() {
-        return createDynamicComponent(() => val.value, null, null, true, true)
+        return createDynamicComponent(
+          () => val.value,
+          null,
+          null,
+          VaporDynamicComponentFlags.SINGLE_ROOT |
+            VaporDynamicComponentFlags.ONCE,
+        )
       },
     }).render()
 
@@ -93,8 +104,8 @@ describe('api: createDynamicComponent', () => {
           () => val.value,
           { id: () => id.value },
           null,
-          true,
-          true,
+          VaporDynamicComponentFlags.SINGLE_ROOT |
+            VaporDynamicComponentFlags.ONCE,
         )
       },
     }).render()
@@ -185,10 +196,65 @@ describe('api: createDynamicComponent', () => {
     )
   })
 
+  test('fallback with function rawSlots as default slot', () => {
+    const { html } = define({
+      setup() {
+        return createDynamicComponent(
+          () => 'div',
+          null,
+          () => template('<span>hi</span>')(),
+        )
+      },
+    }).render()
+
+    expect(html()).toBe('<div><span>hi</span></div><!--dynamic-component-->')
+  })
+
+  test('reuses normalized function rawSlots on dynamic component updates', async () => {
+    const rawSlots: unknown[] = []
+    const CompA = defineVaporComponent({
+      setup() {
+        rawSlots.push((currentInstance as VaporComponentInstance).rawSlots)
+        return template('<div>A</div>')()
+      },
+    })
+    const CompB = defineVaporComponent({
+      setup() {
+        rawSlots.push((currentInstance as VaporComponentInstance).rawSlots)
+        return template('<div>B</div>')()
+      },
+    })
+
+    const current = shallowRef(CompA)
+    const { html } = define({
+      setup() {
+        return createDynamicComponent(
+          () => current.value,
+          null,
+          () => template('<span>slot</span>')(),
+        )
+      },
+    }).render()
+
+    expect(html()).toBe('<div>A</div><!--dynamic-component-->')
+
+    current.value = CompB
+    await nextTick()
+
+    expect(html()).toBe('<div>B</div><!--dynamic-component-->')
+    expect(rawSlots).toHaveLength(2)
+    expect(rawSlots[1]).toBe(rawSlots[0])
+  })
+
   test('compiled static key on dynamic component fallback', () => {
     const Comp = defineVaporComponent({
       setup() {
-        const n0 = createDynamicComponent(() => 'div', null, null, true)
+        const n0 = createDynamicComponent(
+          () => 'div',
+          null,
+          null,
+          VaporDynamicComponentFlags.SINGLE_ROOT,
+        )
         setBlockKey(n0, 'foo')
         return n0
       },
@@ -221,9 +287,7 @@ describe('api: createDynamicComponent', () => {
       components: { Foo },
       setup() {
         return createComponent(Child, null, {
-          default: withVaporCtx(() =>
-            createDynamicComponent(() => current.value),
-          ),
+          default: () => createDynamicComponent(() => current.value),
         })
       },
     }).render()

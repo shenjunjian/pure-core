@@ -1,4 +1,5 @@
 import {
+  VaporDynamicComponentFlags,
   camelize,
   extend,
   getModifierPropName,
@@ -7,12 +8,8 @@ import {
 } from '@vue/shared'
 import type { CodegenContext } from '../generate'
 import {
-  type BlockIRNode,
   type CreateComponentIRNode,
-  type ForIRNode,
-  type IRDynamicInfo,
   IRDynamicPropsKind,
-  IRNodeTypes,
   type IRProp,
   type IRProps,
   type IRPropsStatic,
@@ -23,8 +20,6 @@ import {
   IRSlotType,
   type IRSlots,
   type IRSlotsStatic,
-  type IfIRNode,
-  type OperationNode,
   type SlotBlockIRNode,
 } from '../ir'
 import {
@@ -41,7 +36,6 @@ import {
 import { genExpression, genVarName } from './expression'
 import { genPropKey, genPropValue } from './prop'
 import {
-  NodeTypes,
   type SimpleExpressionNode,
   createSimpleExpression,
   isMemberExpression,
@@ -49,7 +43,7 @@ import {
 } from '@vue/compiler-dom'
 import { genEventHandler } from './event'
 import { genDirectiveModifiers, genDirectivesForElement } from './directive'
-import { genBlock } from './block'
+import { genBlock, markSlotRootOperations } from './block'
 import {
   type DestructureMap,
   type DestructureMapValue,
@@ -58,6 +52,7 @@ import {
 } from './for'
 import { genModelHandler } from './vModel'
 import { isBuiltInComponent } from '../utils'
+import type { Expression } from '@babel/types'
 
 export function genCreateComponent(
   operation: CreateComponentIRNode,
@@ -75,7 +70,15 @@ export function genCreateComponent(
     useAssetComponentHelper && operation.tag.endsWith('__self')
 
   const tag = genTag()
-  const { root, props, slots, once } = operation
+  const { root, props, slots, once, slotRoot } = operation
+  const isRuntimeDynamicComponent = !!(
+    operation.dynamic && !operation.dynamic.isStatic
+  )
+  const dynamicComponentFlags = isRuntimeDynamicComponent
+    ? (root ? VaporDynamicComponentFlags.SINGLE_ROOT : 0) |
+      (once ? VaporDynamicComponentFlags.ONCE : 0) |
+      (slotRoot ? VaporDynamicComponentFlags.SLOT_ROOT : 0)
+    : 0
   const rawSlots = genRawSlots(slots, context)
   const [ids, handlers] = processInlineHandlers(props, context)
   const rawProps = context.withId(() => genRawProps(props, context, true), ids)
@@ -92,7 +95,7 @@ export function genCreateComponent(
     ...inlineHandlers,
     `const n${operation.id} = `,
     ...genCall(
-      operation.dynamic && !operation.dynamic.isStatic
+      isRuntimeDynamicComponent
         ? helper('createDynamicComponent')
         : operation.useCreateElement
           ? helper('createPlainElement')
@@ -104,9 +107,15 @@ export function genCreateComponent(
       tag,
       rawProps,
       rawSlots,
-      root ? 'true' : false,
-      once && 'true',
-      maybeSelfReference && 'true',
+      isRuntimeDynamicComponent
+        ? dynamicComponentFlags
+          ? String(dynamicComponentFlags)
+          : false
+        : root
+          ? 'true'
+          : false,
+      isRuntimeDynamicComponent ? false : once && 'true',
+      isRuntimeDynamicComponent ? false : maybeSelfReference && 'true',
     ),
     ...genDirectivesForElement(operation.id, context),
   ]
@@ -314,7 +323,7 @@ function genStaticProps(
         context,
         true,
         true,
-        directStaticLiteralProps && isDirectStaticLiteralProp(prop),
+        directStaticLiteralProps && isDirectStaticLiteralProp(prop, context),
       ),
     )
 
@@ -473,20 +482,96 @@ function genProp(
  * touch reactive state. Keep handlers, v-model values, and dynamic expressions
  * as getter sources to preserve lazy access and merge semantics.
  */
-function isDirectStaticLiteralProp(prop: IRProp): boolean {
+function isDirectStaticLiteralProp(
+  prop: IRProp,
+  context: CodegenContext,
+): boolean {
   return (
     prop.key.isStatic &&
     prop.values.length === 1 &&
-    prop.values[0].isStatic &&
     !prop.handler &&
-    !prop.model
+    !prop.model &&
+    isDirectConstantValue(prop.values[0], context)
   )
+}
+
+function isDirectConstantValue(
+  value: SimpleExpressionNode,
+  context: CodegenContext,
+): boolean {
+  value = context.getExpressionReplacement(value)
+  if (value.isStatic) return true
+
+  const ast = value.ast
+  if (ast === null) {
+    return (
+      value.content === 'true' ||
+      value.content === 'false' ||
+      value.content === 'null' ||
+      value.content === 'undefined'
+    )
+  }
+  if (!ast) return false
+  return isDirectConstantAst(ast as Expression)
+}
+
+function isDirectConstantAst(node: Expression): boolean {
+  switch (node.type) {
+    case 'StringLiteral':
+    case 'NumericLiteral':
+    case 'BooleanLiteral':
+    case 'NullLiteral':
+    case 'BigIntLiteral':
+      return true
+    case 'Identifier':
+      return node.name === 'undefined'
+    case 'TemplateLiteral':
+      return node.expressions.every(expression =>
+        isDirectTemplateConstantAst(expression as Expression),
+      )
+    case 'ArrayExpression':
+      return node.elements.every(
+        element =>
+          element === null ||
+          (element.type !== 'SpreadElement' && isDirectConstantAst(element)),
+      )
+    case 'ObjectExpression':
+      return node.properties.every(
+        prop =>
+          prop.type === 'ObjectProperty' &&
+          !prop.computed &&
+          isDirectConstantAst(prop.value as Expression),
+      )
+  }
+  return false
+}
+
+function isDirectTemplateConstantAst(node: Expression): boolean {
+  switch (node.type) {
+    case 'StringLiteral':
+    case 'NumericLiteral':
+    case 'BooleanLiteral':
+    case 'NullLiteral':
+    case 'BigIntLiteral':
+      return true
+    case 'Identifier':
+      return node.name === 'undefined'
+    case 'TemplateLiteral':
+      return node.expressions.every(expression =>
+        isDirectTemplateConstantAst(expression as Expression),
+      )
+  }
+  return false
 }
 
 function genRawSlots(slots: IRSlots[], context: CodegenContext) {
   if (!slots.length) return
   const staticSlots = slots[0]
   if (staticSlots.slotType === IRSlotType.STATIC) {
+    const defaultSlot = getSingleDefaultSlot(staticSlots)
+    if (defaultSlot && slots.length === 1) {
+      return genSlotBlockWithProps(defaultSlot, context)
+    }
     // single static slot
     return genStaticSlots(
       staticSlots,
@@ -500,6 +585,13 @@ function genRawSlots(slots: IRSlots[], context: CodegenContext) {
       slots,
     )
   }
+}
+
+function getSingleDefaultSlot({ slots }: IRSlotsStatic) {
+  const names = Object.keys(slots)
+  return names.length === 1 && names[0] === 'default'
+    ? slots.default
+    : undefined
 }
 
 function genStaticSlots(
@@ -552,23 +644,7 @@ function genDynamicSlot(
   }
   if (!withFunction) return frag
 
-  return needsDynamicSlotSourceCtx(slot)
-    ? [`${context.helper('withVaporCtx')}(() => (`, ...frag, '))']
-    : ['() => (', ...frag, ')']
-}
-
-function needsDynamicSlotSourceCtx(slot: IRSlotDynamic): boolean {
-  switch (slot.slotType) {
-    case IRSlotType.DYNAMIC:
-      return needsVaporCtx(slot.fn)
-    case IRSlotType.LOOP:
-      return needsVaporCtx(slot.fn)
-    case IRSlotType.CONDITIONAL:
-      return (
-        needsDynamicSlotSourceCtx(slot.positive) ||
-        (slot.negative ? needsDynamicSlotSourceCtx(slot.negative) : false)
-      )
-  }
+  return ['() => (', ...frag, ')']
 }
 
 function genBasicDynamicSlot(
@@ -646,7 +722,7 @@ function genSlotBlockWithProps(oper: SlotBlockIRNode, context: CodegenContext) {
   let propsName: string | undefined
   let exitScope: (() => void) | undefined
   let depth: number | undefined
-  const { props, node } = oper
+  const { props } = oper
   const idToPathMap: DestructureMap = props
     ? parseValueDestructure(props, context)
     : new Map<string, DestructureMapValue | null>()
@@ -672,94 +748,14 @@ function genSlotBlockWithProps(oper: SlotBlockIRNode, context: CodegenContext) {
     idMap[propsName] = null
   }
 
+  const exitSlotBlock = context.enterSlotBlock()
+  markSlotRootOperations(oper)
   let blockFn = context.withId(
     () => genBlock(oper, context, propsName ? [propsName] : []),
     idMap,
   )
+  exitSlotBlock()
   exitScope && exitScope()
 
-  if (node.type === NodeTypes.ELEMENT) {
-    // wrap with withVaporCtx to track slot owner for:
-    // 1. createSlot to get correct rawSlots in forwarded slots
-    // 2. scopeId inheritance for components created inside slots
-    // Skip if slot content has no components or slot outlets
-    if (needsVaporCtx(oper)) {
-      blockFn = [`${context.helper('withVaporCtx')}(`, ...blockFn, `)`]
-    }
-  }
-
   return blockFn
-}
-
-/**
- * Check if a slot block needs withVaporCtx wrapper.
- * Returns true if the block contains:
- * - Component creation (needs scopeId inheritance)
- * - Slot outlet (needs rawSlots from slot owner)
- */
-function needsVaporCtx(block: BlockIRNode): boolean {
-  return hasComponentOrSlotInBlock(block)
-}
-
-function hasComponentOrSlotInBlock(block: BlockIRNode): boolean {
-  // Check operations array
-  if (hasComponentOrSlotInOperations(block.operation)) return true
-  // Check dynamic children (components are often stored here)
-  return hasComponentOrSlotInDynamic(block.dynamic)
-}
-
-function hasComponentOrSlotInDynamic(dynamic: IRDynamicInfo): boolean {
-  // Check operation in this dynamic node
-  if (dynamic.operation) {
-    const type = dynamic.operation.type
-    if (
-      type === IRNodeTypes.CREATE_COMPONENT_NODE ||
-      type === IRNodeTypes.SLOT_OUTLET_NODE
-    ) {
-      return true
-    }
-    if (type === IRNodeTypes.IF) {
-      if (hasComponentOrSlotInIf(dynamic.operation as IfIRNode)) return true
-    }
-    if (type === IRNodeTypes.FOR) {
-      if (hasComponentOrSlotInBlock((dynamic.operation as ForIRNode).render))
-        return true
-    }
-  }
-  // Recursively check children
-  for (const child of dynamic.children) {
-    if (hasComponentOrSlotInDynamic(child)) return true
-  }
-  return false
-}
-
-function hasComponentOrSlotInOperations(operations: OperationNode[]): boolean {
-  for (const op of operations) {
-    switch (op.type) {
-      case IRNodeTypes.CREATE_COMPONENT_NODE:
-      case IRNodeTypes.SLOT_OUTLET_NODE:
-        return true
-      case IRNodeTypes.IF:
-        if (hasComponentOrSlotInIf(op as IfIRNode)) return true
-        break
-      case IRNodeTypes.FOR:
-        if (hasComponentOrSlotInBlock((op as ForIRNode).render)) return true
-        break
-    }
-  }
-  return false
-}
-
-function hasComponentOrSlotInIf(node: IfIRNode): boolean {
-  if (hasComponentOrSlotInBlock(node.positive)) return true
-  if (node.negative) {
-    if ('positive' in node.negative) {
-      // nested IfIRNode
-      return hasComponentOrSlotInIf(node.negative as IfIRNode)
-    } else {
-      // BlockIRNode
-      return hasComponentOrSlotInBlock(node.negative as BlockIRNode)
-    }
-  }
-  return false
 }

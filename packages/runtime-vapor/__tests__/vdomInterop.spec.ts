@@ -32,6 +32,7 @@ import {
   withCtx,
   withDirectives,
 } from '@vue/runtime-dom'
+import { VaporDynamicComponentFlags, VaporSlotFlags } from '@vue/shared'
 import { VaporSlot } from '../../runtime-core/src/vnode'
 import { compile, makeInteropRender } from './_utils'
 import {
@@ -62,7 +63,6 @@ import {
   template,
   txt,
   vaporInteropPlugin,
-  withVaporCtx,
 } from '../src'
 
 const define = makeInteropRender()
@@ -223,6 +223,77 @@ describe('vdomInterop', () => {
         true,
       )
       expect(onUpdated).toHaveBeenCalled()
+    })
+
+    test('mounts vnode slot content after active fallback without reusing invalid vnode content', async () => {
+      const show = ref(false)
+      const childRef = ref<any>(null)
+      const mounted = vi.fn()
+      const unmounted = vi.fn()
+
+      const VDomChild = defineComponent({
+        setup() {
+          onMounted(mounted)
+          onUnmounted(unmounted)
+          return () => h('div', 'child')
+        },
+      })
+
+      const VaporChild = defineVaporComponent({
+        setup() {
+          return createSlot('default', null, () =>
+            template('<span>fallback</span>')(),
+          ) as any
+        },
+      })
+
+      const Parent = defineComponent({
+        setup() {
+          return () =>
+            h(VaporChild as any, null, {
+              default: () =>
+                show.value ? [h(VDomChild, { ref: childRef })] : [],
+            })
+        },
+      })
+
+      const app = createApp(Parent)
+      app.use(vaporInteropPlugin)
+      const root = document.createElement('div')
+      app.mount(root)
+
+      expect(root.innerHTML).toBe('<span>fallback</span>')
+      expect(childRef.value).toBe(null)
+      expect(mounted).not.toHaveBeenCalled()
+      expect(unmounted).not.toHaveBeenCalled()
+
+      show.value = true
+      await nextTick()
+
+      expect(root.innerHTML).toBe('<div>child</div>')
+      expect(childRef.value).not.toBe(null)
+      expect(mounted).toHaveBeenCalledTimes(1)
+      expect(unmounted).not.toHaveBeenCalled()
+
+      show.value = false
+      await nextTick()
+
+      expect(root.innerHTML).toBe('<span>fallback</span>')
+      expect(childRef.value).toBe(null)
+      expect(mounted).toHaveBeenCalledTimes(1)
+      expect(unmounted).toHaveBeenCalledTimes(1)
+
+      show.value = true
+      await nextTick()
+
+      expect(root.innerHTML).toBe('<div>child</div>')
+      expect(childRef.value).not.toBe(null)
+      expect(mounted).toHaveBeenCalledTimes(2)
+      expect(unmounted).toHaveBeenCalledTimes(1)
+
+      app.unmount()
+      expect(childRef.value).toBe(null)
+      expect(unmounted).toHaveBeenCalledTimes(2)
     })
   })
 
@@ -565,7 +636,7 @@ describe('vdomInterop', () => {
                 return input
               },
             },
-            true,
+            VaporDynamicComponentFlags.SINGLE_ROOT,
           )
         },
       })
@@ -887,6 +958,73 @@ describe('vdomInterop', () => {
       }).render()
 
       expect(html()).toBe('default slot')
+    })
+
+    test('does not expose Vapor dynamic slots marker to vdom slots', () => {
+      const keys: string[][] = []
+      const VDomChild = defineComponent({
+        setup(_, { slots }) {
+          return () => {
+            keys.push(Object.keys(slots))
+            return renderSlot(slots, 'default')
+          }
+        },
+      })
+
+      const VaporChild = defineVaporComponent({
+        setup() {
+          return createComponent(
+            VDomChild as any,
+            null,
+            {
+              default: () => document.createTextNode('static slot'),
+              $: [
+                () => ({
+                  name: 'default',
+                  fn: () => document.createTextNode('dynamic slot'),
+                }),
+              ],
+            },
+            true,
+          )
+        },
+      })
+
+      const { html } = define({
+        setup() {
+          return () => h(VaporChild as any)
+        },
+      }).render()
+
+      expect(html()).toBe('dynamic slot')
+      expect(keys).toEqual([['default']])
+    })
+
+    test('function rawSlots are normalized before mounting vdom component', () => {
+      const VDomChild = defineComponent({
+        setup(_, { slots }) {
+          return () => h('div', null, slots.default!({ msg: 'default slot' }))
+        },
+      })
+
+      const VaporChild = defineVaporComponent({
+        setup() {
+          return createComponent(
+            VDomChild as any,
+            null,
+            (props: { msg: string }) => document.createTextNode(props.msg),
+            true,
+          )
+        },
+      })
+
+      const { html } = define({
+        setup() {
+          return () => h(VaporChild as any)
+        },
+      }).render()
+
+      expect(html()).toBe('<div>default slot</div>')
     })
 
     test('collects compiled vdom component vnodes without hydrating vapor slot content', () => {
@@ -1278,6 +1416,274 @@ describe('vdomInterop', () => {
       expect(html()).toBe('<span>updated</span>')
     })
 
+    test('applies v-once to VDOM slot content passed to Vapor', async () => {
+      const msg = ref('default slot')
+      const VaporChild = defineVaporComponent(() =>
+        createSlot('default', null, undefined, VaporSlotFlags.ONCE),
+      )
+
+      const { html } = define({
+        setup() {
+          return () =>
+            h(VaporChild as any, null, {
+              default: () => h('span', msg.value),
+            })
+        },
+      }).render()
+
+      expect(html()).toBe('<span>default slot</span>')
+
+      msg.value = 'updated'
+      await nextTick()
+      expect(html()).toBe('<span>default slot</span>')
+    })
+
+    test('applies v-once to dynamic VDOM slot names passed to Vapor', async () => {
+      const slotName = ref('one')
+      const VaporChild = defineVaporComponent(() =>
+        createSlot(() => slotName.value, null, undefined, VaporSlotFlags.ONCE),
+      )
+
+      const { html } = define({
+        setup() {
+          return () =>
+            h(VaporChild as any, null, {
+              one: () => h('span', 'one'),
+              two: () => h('span', 'two'),
+            })
+        },
+      }).render()
+
+      expect(html()).toBe('<span>one</span>')
+
+      slotName.value = 'two'
+      await nextTick()
+      expect(html()).toBe('<span>one</span>')
+    })
+
+    test('applies v-once when VDOM slot availability changes', async () => {
+      const show = ref(true)
+      const VaporChild = defineVaporComponent(() =>
+        createSlot('default', null, undefined, VaporSlotFlags.ONCE),
+      )
+
+      const { html } = define({
+        setup() {
+          return () =>
+            h(
+              VaporChild as any,
+              null,
+              show.value ? { default: () => h('span', 'one') } : {},
+            )
+        },
+      }).render()
+
+      expect(html()).toBe('<span>one</span>')
+
+      show.value = false
+      await nextTick()
+      expect(html()).toBe('<span>one</span>')
+    })
+
+    test('applies v-once to VDOM slot outlet fallback', async () => {
+      const msg = ref('fallback')
+      const VaporChild = defineVaporComponent(() =>
+        createSlot(
+          'default',
+          null,
+          () => {
+            const n0 = template('<span> </span>')() as any
+            const t0 = txt(n0) as any
+            renderEffect(() => setText(t0, msg.value))
+            return n0
+          },
+          VaporSlotFlags.ONCE,
+        ),
+      )
+
+      const { html } = define({
+        setup() {
+          return () => h(VaporChild as any)
+        },
+      }).render()
+
+      expect(html()).toBe('<span>fallback</span>')
+
+      msg.value = 'updated'
+      await nextTick()
+      expect(html()).toBe('<span>fallback</span>')
+    })
+
+    test('preserves VDOM child updates inside v-once slot content', async () => {
+      let increment!: () => void
+      const VDomChild = defineComponent({
+        setup() {
+          const count = ref(0)
+          increment = () => count.value++
+          return () => h('span', count.value)
+        },
+      })
+      const VaporChild = defineVaporComponent(() =>
+        createSlot('default', null, undefined, VaporSlotFlags.ONCE),
+      )
+
+      const { html } = define({
+        setup() {
+          return () =>
+            h(VaporChild as any, null, {
+              default: () => h(VDomChild),
+            })
+        },
+      }).render()
+
+      expect(html()).toBe('<span>0</span>')
+
+      increment()
+      await nextTick()
+      expect(html()).toBe('<span>1</span>')
+    })
+
+    test('snapshots delayed slot prop reads inside v-once VDOM slot content', async () => {
+      let increment!: () => void
+      const label = ref('initial')
+      const VDomChild = defineComponent({
+        props: ['slotProps'],
+        setup(props: any) {
+          const count = ref(0)
+          increment = () => count.value++
+          return () => h('span', `${props.slotProps.label}:${count.value}`)
+        },
+      })
+      const VaporChild = defineVaporComponent(() =>
+        createSlot(
+          'default',
+          { label: () => label.value },
+          undefined,
+          VaporSlotFlags.ONCE,
+        ),
+      )
+
+      const { html } = define({
+        setup() {
+          return () =>
+            h(VaporChild as any, null, {
+              default: (slotProps: any) => h(VDomChild, { slotProps }),
+            })
+        },
+      }).render()
+
+      expect(html()).toBe('<span>initial:0</span>')
+
+      label.value = 'updated'
+      increment()
+      await nextTick()
+      expect(html()).toBe('<span>initial:1</span>')
+    })
+
+    test('preserves VDOM child updates inside v-once fallback', async () => {
+      let increment!: () => void
+      const label = ref('initial')
+      const VDomChild = defineComponent({
+        props: ['label'],
+        setup(props) {
+          const count = ref(0)
+          increment = () => count.value++
+          return () => h('span', `${props.label}:${count.value}`)
+        },
+      })
+      const VaporChild = defineVaporComponent(() =>
+        createSlot(
+          'default',
+          null,
+          () => createComponent(VDomChild as any, { label: () => label.value }),
+          VaporSlotFlags.ONCE,
+        ),
+      )
+
+      const { html } = define({
+        setup() {
+          return () => h(VaporChild as any)
+        },
+      }).render()
+
+      expect(html()).toBe('<span>initial:0</span>')
+
+      label.value = 'updated'
+      increment()
+      await nextTick()
+      expect(html()).toBe('<span>initial:1</span>')
+    })
+
+    test('preserves Vapor child updates inside v-once VDOM slot content', async () => {
+      let increment!: () => void
+      const VaporGrandChild = defineVaporComponent({
+        setup() {
+          const count = ref(0)
+          increment = () => count.value++
+          const n0 = template('<span> </span>')() as any
+          const t0 = txt(n0) as any
+          renderEffect(() => setText(t0, String(count.value)))
+          return n0
+        },
+      })
+      const VaporChild = defineVaporComponent(() =>
+        createSlot('default', null, undefined, VaporSlotFlags.ONCE),
+      )
+
+      const { html } = define({
+        setup() {
+          return () =>
+            h(VaporChild as any, null, {
+              default: () => h(VaporGrandChild as any),
+            })
+        },
+      }).render()
+
+      expect(html()).toBe('<span>0</span>')
+
+      increment()
+      await nextTick()
+      expect(html()).toBe('<span>1</span>')
+    })
+
+    test('preserves VDOM child local props passed to Vapor descendants inside v-once slot content', async () => {
+      let increment!: () => void
+      const VaporGrandChild = defineVaporComponent({
+        props: ['count'],
+        setup(props: any) {
+          const n0 = template('<span> </span>')() as any
+          const t0 = txt(n0) as any
+          renderEffect(() => setText(t0, String(props.count)))
+          return n0
+        },
+      })
+      const VDomChild = defineComponent({
+        setup() {
+          const count = ref(0)
+          increment = () => count.value++
+          return () => h(VaporGrandChild as any, { count: count.value })
+        },
+      })
+      const VaporChild = defineVaporComponent(() =>
+        createSlot('default', null, undefined, VaporSlotFlags.ONCE),
+      )
+
+      const { html } = define({
+        setup() {
+          return () =>
+            h(VaporChild as any, null, {
+              default: () => h(VDomChild),
+            })
+        },
+      }).render()
+
+      expect(html()).toBe('<span>0</span>')
+
+      increment()
+      await nextTick()
+      expect(html()).toBe('<span>1</span>')
+    })
+
     test('falls through to outlet fallback when vdom local fallback is invalidated or removed from VaporSlot', async () => {
       const mode = ref<'local' | 'empty' | 'none'>('local')
       const localText = ref('local fallback')
@@ -1315,7 +1721,7 @@ describe('vdomInterop', () => {
             VDomInnerSlot as any,
             null,
             {
-              bar: withVaporCtx(() => createSlot('bar', null)),
+              bar: () => createSlot('bar', null),
             },
             true,
           )
@@ -1418,12 +1824,11 @@ describe('vdomInterop', () => {
         const slots = useSlots()
         return createComponent(Inner, null, {
           $: [
-            withVaporCtx(() =>
+            () =>
               createForSlots(slots, (_slot, name) => ({
                 name,
-                fn: withVaporCtx(() => createSlot(name)),
-              })),
-            ) as any,
+                fn: () => createSlot(name),
+              })) as any,
           ],
         })
       })
@@ -1482,13 +1887,13 @@ describe('vdomInterop', () => {
             VDomChild as any,
             null,
             {
-              default: withVaporCtx((props: any) => {
+              default: (props: any) => {
                 const span = document.createElement('span')
                 renderEffect(() => {
                   span.textContent = props.msg
                 })
                 return span
-              }),
+              },
             },
             true,
           )
@@ -3168,7 +3573,7 @@ describe('vdomInterop', () => {
       const App = defineVaporComponent({
         setup() {
           return createComponent(VaporKeepAlive, null, {
-            default: withVaporCtx(() =>
+            default: () =>
               createIf(
                 () => show.value,
                 () =>
@@ -3176,16 +3581,14 @@ describe('vdomInterop', () => {
                     VDomComp as any,
                     null,
                     {
-                      default: withVaporCtx(() =>
+                      default: () =>
                         createSlot('default', null, () =>
                           createComponent(VaporFallback as any),
                         ),
-                      ),
                     },
                     true,
                   ),
               ),
-            ),
           })
         },
       })
@@ -3250,9 +3653,9 @@ describe('vdomInterop', () => {
             () => show.value,
             () =>
               createComponent(VDomCommentWrapper as any, null, {
-                default: withVaporCtx(() =>
+                default: () =>
                   createComponent(VaporKeepAlive, null, {
-                    default: withVaporCtx(() =>
+                    default: () =>
                       createComponent(
                         VaporTeleport,
                         { to: () => '#keepalive-teleport-target' },
@@ -3260,9 +3663,7 @@ describe('vdomInterop', () => {
                           default: () => template('<input>')(),
                         },
                       ),
-                    ),
                   }),
-                ),
               }),
           )
         },
@@ -3300,9 +3701,9 @@ describe('vdomInterop', () => {
             () => show.value,
             () =>
               createComponent(VDomCommentWrapper as any, null, {
-                default: withVaporCtx(() =>
+                default: () =>
                   createComponent(VaporKeepAlive, null, {
-                    default: withVaporCtx(() =>
+                    default: () =>
                       createComponent(
                         VaporTeleport,
                         {
@@ -3313,9 +3714,7 @@ describe('vdomInterop', () => {
                           default: () => template('<input>')(),
                         },
                       ),
-                    ),
                   }),
-                ),
               }),
           )
         },
@@ -3358,9 +3757,9 @@ describe('vdomInterop', () => {
             () => show.value,
             () =>
               createComponent(VDomCommentWrapper as any, null, {
-                default: withVaporCtx(() =>
+                default: () =>
                   createComponent(VaporKeepAlive, null, {
-                    default: withVaporCtx(() =>
+                    default: () =>
                       createComponent(
                         VaporTeleport,
                         { to: () => to.value },
@@ -3368,9 +3767,7 @@ describe('vdomInterop', () => {
                           default: () => template('<input>')(),
                         },
                       ),
-                    ),
                   }),
-                ),
               }),
           )
         },
@@ -3414,7 +3811,7 @@ describe('vdomInterop', () => {
       const NestedKeepAlive = defineVaporComponent({
         setup() {
           return createComponent(VaporKeepAlive, null, {
-            default: withVaporCtx(() => createSlot('default')),
+            default: () => createSlot('default'),
           })
         },
       })
@@ -3425,9 +3822,9 @@ describe('vdomInterop', () => {
             () => show.value,
             () =>
               createComponent(VDomCommentWrapper as any, null, {
-                default: withVaporCtx(() =>
+                default: () =>
                   createComponent(NestedKeepAlive, null, {
-                    default: withVaporCtx(() =>
+                    default: () =>
                       createComponent(
                         VaporTeleport,
                         { to: () => '#nested-keepalive-teleport-target' },
@@ -3435,9 +3832,7 @@ describe('vdomInterop', () => {
                           default: () => template('<input>')(),
                         },
                       ),
-                    ),
                   }),
-                ),
               }),
           )
         },
@@ -3472,7 +3867,7 @@ describe('vdomInterop', () => {
       const VaporChild = defineVaporComponent({
         setup() {
           return createComponent(VaporKeepAlive, null, {
-            default: withVaporCtx(() =>
+            default: () =>
               createComponent(
                 VaporTeleport,
                 {
@@ -3482,7 +3877,6 @@ describe('vdomInterop', () => {
                   default: () => template('<input>')(),
                 },
               ),
-            ),
           })
         },
       })
@@ -3891,7 +4285,7 @@ describe('vdomInterop', () => {
               {
                 default: () => template('<span>teleported</span>')(),
               },
-              true,
+              VaporDynamicComponentFlags.SINGLE_ROOT,
             )
           },
         })
@@ -3971,7 +4365,7 @@ describe('vdomInterop', () => {
       }
     })
 
-    test('keeps slot fallback before carrier anchor after teleport move and fallback update', async () => {
+    test('keeps slot fallback before slot anchor after teleport move and fallback update', async () => {
       const targetA = document.createElement('div')
       targetA.id = 'interop-slot-fallback-target-a'
       const targetB = document.createElement('div')
@@ -3999,16 +4393,15 @@ describe('vdomInterop', () => {
                 to: () => to.value,
               },
               {
-                default: withVaporCtx(() =>
+                default: () =>
                   createComponent(
                     VDomSlotOutlet as any,
                     null,
                     {
-                      default: withVaporCtx(() => createSlot('default')),
+                      default: () => createSlot('default'),
                     },
                     true,
                   ),
-                ),
               },
             )
           },
@@ -4222,9 +4615,7 @@ describe('vdomInterop', () => {
                   VaporAsyncChild,
                   null,
                   {
-                    default: withVaporCtx(() =>
-                      template('<span>slot content</span>')(),
-                    ),
+                    default: () => template('<span>slot content</span>')(),
                   },
                   true,
                 ),
@@ -4444,7 +4835,7 @@ describe('vdomInterop', () => {
                   () => h(VDomAsyncChild as any),
                   null,
                   null,
-                  true,
+                  VaporDynamicComponentFlags.SINGLE_ROOT,
                 ),
               fallback: () => template('loading')(),
             },
@@ -4477,7 +4868,7 @@ describe('vdomInterop', () => {
               default: () => template('<span>resolved</span>')(),
               fallback: () => template('<span>fallback</span>')(),
             },
-            true,
+            VaporDynamicComponentFlags.SINGLE_ROOT,
           )
         },
       })

@@ -23,10 +23,17 @@ import {
   ref,
   withDirectives,
 } from '@vue/runtime-dom'
+import { BindingTypes } from '@vue/compiler-dom'
 import { Namespaces, isString } from '@vue/shared'
 import type { VaporComponentInstance } from '../src/component'
 import type { TeleportFragment } from '../src/components/Teleport'
-import { VueServerRenderer, compile, runtimeDom, runtimeVapor } from './_utils'
+import {
+  VueServerRenderer,
+  compile,
+  compileToVaporRender,
+  runtimeDom,
+  runtimeVapor,
+} from './_utils'
 import {
   hydrateNode,
   setIsHydratingEnabled,
@@ -438,6 +445,49 @@ describe('Vapor Mode hydration', () => {
         ref({ beforeMount }),
       )
       expect(beforeMount).toHaveBeenCalledTimes(1)
+    })
+
+    test('dynamic child component root preserves inherited scopeId after hydration update', async () => {
+      const showAlt = ref(false)
+      const Child = defineVaporComponent({
+        __scopeId: 'child',
+        render: compileToVaporRender(
+          `<section v-if="showAlt">alt</section><div v-else>base</div>`,
+          {
+            bindingMetadata: {
+              showAlt: BindingTypes.SETUP_REF,
+            },
+            scopeId: 'child',
+          },
+        ),
+        setup() {
+          return { showAlt }
+        },
+      })
+
+      const Parent = defineVaporComponent({
+        __scopeId: 'parent',
+        setup() {
+          return createComponent(Child)
+        },
+      })
+
+      const container = document.createElement('div')
+      document.body.appendChild(container)
+      container.innerHTML = `<div child="" parent="">base</div>`
+
+      createVaporSSRApp(Parent).mount(container)
+
+      expect(container.innerHTML).toBe(
+        `<div child="" parent="">base</div><!--if-->`,
+      )
+
+      showAlt.value = true
+      await nextTick()
+
+      expect(container.innerHTML).toBe(
+        `<section child="" parent="">alt</section><!--if-->`,
+      )
     })
 
     test('basic component', async () => {
@@ -1275,6 +1325,49 @@ describe('Vapor Mode hydration', () => {
       await nextTick()
       expect(formatHtml(container.innerHTML)).toMatchInlineSnapshot(
         `"<div>foo</div><!---->"`,
+      )
+    })
+
+    test('v-if decodes packed branch shapes and keyed index during hydration', async () => {
+      const code = `<template>
+        <template v-if="data.ok"><span>foo</span>bar</template>
+        <template v-else><div>baz</div></template>
+      </template>`
+
+      const truthy = ref({ ok: true })
+      const { container: trueContainer } = await testHydration(
+        code,
+        undefined,
+        truthy,
+      )
+      expect(formatHtml(trueContainer.innerHTML)).toMatchInlineSnapshot(
+        `"
+<!--[--><span>foo</span>bar<!--]-->
+"`,
+      )
+
+      truthy.value.ok = false
+      await nextTick()
+      expect(formatHtml(trueContainer.innerHTML)).toMatchInlineSnapshot(
+        `"
+<!--[--><div>baz</div><!--]-->
+"`,
+      )
+
+      const falsy = ref({ ok: false })
+      const { container: falseContainer } = await testHydration(
+        code,
+        undefined,
+        falsy,
+      )
+      expect(formatHtml(falseContainer.innerHTML)).toMatchInlineSnapshot(
+        `"<div>baz</div><!--if-->"`,
+      )
+
+      falsy.value.ok = true
+      await nextTick()
+      expect(formatHtml(falseContainer.innerHTML)).toMatchInlineSnapshot(
+        `"<span>foo</span>bar<!--if-->"`,
       )
     })
 
@@ -2349,6 +2442,142 @@ describe('Vapor Mode hydration', () => {
         <!--[--><span>bar</span><!--]-->
         "
       `,
+      )
+    })
+
+    test('dynamic slot outlet update preserves slotted scope id', async () => {
+      const data = ref({ slotName: 'one' })
+      const childCode = `<template><slot :name="data.slotName" /></template>`
+      const appCode = `<script setup vapor>
+        const data = _data
+        const components = _components
+      </script>
+      <template>
+        <components.Child>
+          <template #one><div>one</div></template>
+          <template #two><section>two</section></template>
+        </components.Child>
+      </template>`
+
+      const container = document.createElement('div')
+      document.body.appendChild(container)
+      container.innerHTML = `<!--[--><div child-s="">one</div><!--]-->`
+
+      const clientComponents: Record<string, any> = {}
+      clientComponents.Child = compile(childCode, data, clientComponents, {
+        vapor: true,
+        ssr: false,
+      })
+      clientComponents.Child.__scopeId = 'child'
+      const ClientApp = compile(appCode, data, clientComponents, {
+        vapor: true,
+        ssr: false,
+      })
+      createVaporSSRApp(ClientApp).mount(container)
+
+      expect(formatHtml(container.innerHTML)).toContain(
+        `<div child-s="">one</div>`,
+      )
+
+      data.value = { slotName: 'two' }
+      await nextTick()
+
+      expect(formatHtml(container.innerHTML)).toContain(
+        `<section child-s="">two</section>`,
+      )
+    })
+
+    test('v-for slot content added after mount preserves slotted scope id', async () => {
+      const data = ref(0)
+      const childCode = `<template><slot /></template>`
+      const appCode = `<script setup vapor>
+        const data = _data
+        const components = _components
+      </script>
+      <template>
+        <components.Child>
+          <div v-for="i in data">item</div>
+          <i>tail</i>
+        </components.Child>
+      </template>`
+
+      const container = document.createElement('div')
+      document.body.appendChild(container)
+      container.innerHTML = `<!--[--><!--[--><!--]--><i child-s="">tail</i><!--]-->`
+
+      const clientComponents: Record<string, any> = {}
+      clientComponents.Child = compile(childCode, data, clientComponents, {
+        vapor: true,
+        ssr: false,
+      })
+      clientComponents.Child.__scopeId = 'child'
+      const ClientApp = compile(appCode, data, clientComponents, {
+        vapor: true,
+        ssr: false,
+      })
+      createVaporSSRApp(ClientApp).mount(container)
+
+      expect(formatHtml(container.innerHTML)).toContain(
+        `<i child-s="">tail</i>`,
+      )
+
+      data.value++
+      await nextTick()
+
+      expect(formatHtml(container.innerHTML)).toContain(
+        `<div child-s="">item</div>`,
+      )
+    })
+
+    test('vdom slot owner vapor slot content added after mount preserves slotted scope id', async () => {
+      const show = ref(false)
+      const childCode = `<template><div><slot /></div></template>`
+      const appCode = `<script setup vapor>
+        const show = _data
+        const components = _components
+      </script>
+      <template>
+        <components.Child>
+          <button v-if="show">item</button>
+        </components.Child>
+      </template>`
+
+      const ssrComponents: Record<string, any> = {}
+      ssrComponents.Child = compile(childCode, show, ssrComponents, {
+        vapor: false,
+        ssr: true,
+      })
+      ssrComponents.Child.__scopeId = 'child'
+      const ServerApp = compile(appCode, show, ssrComponents, {
+        vapor: true,
+        ssr: true,
+      })
+      const serverHtml = await VueServerRenderer.renderToString(
+        runtimeDom.createSSRApp(ServerApp),
+      )
+      const container = document.createElement('div')
+      document.body.appendChild(container)
+      container.innerHTML = serverHtml
+
+      const clientComponents: Record<string, any> = {}
+      clientComponents.Child = compile(childCode, show, clientComponents, {
+        vapor: false,
+        ssr: false,
+      })
+      clientComponents.Child.__scopeId = 'child'
+      const ClientApp = compile(appCode, show, clientComponents, {
+        vapor: true,
+        ssr: false,
+      })
+      createVaporSSRApp(ClientApp)
+        .use(runtimeVapor.vaporInteropPlugin)
+        .mount(container)
+
+      show.value = true
+      await nextTick()
+
+      expect(formatHtml(container.innerHTML)).toContain(
+        `<button child-s="">item</button>`,
       )
     })
 
@@ -3480,7 +3709,17 @@ describe('Vapor Mode hydration', () => {
       expect(formatHtml(container.innerHTML)).toMatchInlineSnapshot(
         `
         "
-        <!--[--><div>baz</div><!--if--><!--for--><!--]-->
+        <!--[--><div>baz</div><!--]-->
+        "
+      `,
+      )
+
+      data.items[0].show = true
+      await nextTick()
+      expect(formatHtml(container.innerHTML)).toMatchInlineSnapshot(
+        `
+        "
+        <!--[--><span>bar</span><!--if--><!--for--><!--]-->
         "
       `,
       )
@@ -3653,9 +3892,9 @@ describe('Vapor Mode hydration', () => {
       )
       expect(formatHtml(container.innerHTML)).toMatchInlineSnapshot(
         `
-      	"<div>
-      	<!--[-->foo<!--]-->
-      	<!--slot--></div>"
+        "<div>
+        <!--[-->foo<!--]-->
+        </div>"
       `,
       )
 
@@ -3663,9 +3902,9 @@ describe('Vapor Mode hydration', () => {
       await nextTick()
       expect(formatHtml(container.innerHTML)).toMatchInlineSnapshot(
         `
-      	"<div>
-      	<!--[-->foo1<!--]-->
-      	<!--slot--></div>"
+        "<div>
+        <!--[-->foo1<!--]-->
+        </div>"
       `,
       )
     })
@@ -10475,6 +10714,42 @@ describe('VDOM interop', () => {
     )
   })
 
+  test('hydrate compiled VDOM slot content can switch to vapor fallback', async () => {
+    const data = ref({ show: true })
+    const { container } = await testWithVDOMApp(
+      `<script setup>
+        const data = _data
+        const components = _components
+      </script>
+      <template>
+        <components.VaporChild>
+          <div v-if="data.show">content</div>
+        </components.VaporChild>
+      </template>`,
+      {
+        VaporChild: {
+          code: `<template><slot><span>fallback</span></slot></template>`,
+          vapor: true,
+        },
+      },
+      data,
+    )
+
+    expect(formatHtml(container.innerHTML)).toMatchInlineSnapshot(`
+      "
+      <!--[--><div>content</div><!--]-->
+      "
+    `)
+
+    data.value.show = false
+    await nextTick()
+    expect(formatHtml(container.innerHTML)).toBe('<span>fallback</span>')
+
+    data.value.show = true
+    await nextTick()
+    expect(formatHtml(container.innerHTML)).toBe('<div>content</div>')
+  })
+
   test('hydrate VDOM slot content can mount after hydrating as empty', async () => {
     const data = reactive({
       show: false,
@@ -10748,7 +11023,7 @@ describe('VDOM interop', () => {
       `
       "
       <!--[-->
-      <!--[--><section>outlet fallback</section><!--v-if--><!--v-if--><!--]-->
+      <!--[--><section>outlet fallback</section><!--]-->
       <!--]-->
       "
     `,
@@ -10760,7 +11035,7 @@ describe('VDOM interop', () => {
       `
       "
       <!--[-->
-      <!--[--><section>updated outlet fallback</section><!--v-if--><!--v-if--><!--]-->
+      <!--[--><section>updated outlet fallback</section><!--]-->
       <!--]-->
       "
     `,
@@ -10980,7 +11255,7 @@ describe('VDOM interop', () => {
       `
         "
         <!--[-->
-        <!--[--><div>foo</div><p>bar</p><!--if--><!--]-->
+        <!--[--><div>foo</div><!--if--><p>bar</p><!--]-->
         <i>tail</i><!--]-->
         "
       `,
@@ -11025,7 +11300,7 @@ describe('VDOM interop', () => {
         "
         <!--[--><div>
         <!--[-->foo<!--]-->
-        <!--slot--></div><!--]-->
+        </div><!--]-->
         "
       `,
     )
@@ -11039,7 +11314,7 @@ describe('VDOM interop', () => {
         "
         <!--[--><div>
         <!--[-->bar<!--]-->
-        <!--slot--></div><!--]-->
+        </div><!--]-->
         "
       `,
     )
@@ -11094,7 +11369,7 @@ describe('VDOM interop', () => {
       "<div>
       <!--[-->
       <!--[--><span>foo</span><!--if--><!--if--><!--if--><!--]-->
-      <!--slot--><!--]-->
+      <!--]-->
       </div>"
     `)
   })

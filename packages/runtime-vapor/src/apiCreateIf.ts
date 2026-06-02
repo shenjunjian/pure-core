@@ -15,15 +15,15 @@ import {
 import { renderEffect } from './renderEffect'
 import { DynamicFragment } from './fragment'
 import { createComment, createTextNode } from './dom/node'
-import { VaporBlockShape } from '@vue/shared'
+import { VaporBlockShape, VaporIfFlags } from '@vue/shared'
 
 export function createIf(
   condition: () => any,
   b1: BlockFn,
   b2?: BlockFn,
-  blockShape?: number,
-  once?: boolean,
-  index?: number,
+  // Default flags encode true single-root + false empty, matching the compiler's
+  // only omitted-flags case.
+  flags: number = VaporBlockShape.SINGLE_ROOT,
 ): Block {
   const _insertionParent = insertionParent
   const _insertionAnchor = insertionAnchor
@@ -32,10 +32,10 @@ export function createIf(
   let branchShape: VaporBlockShape | undefined
 
   let frag: Block
-  if (once) {
+  if (flags & VaporIfFlags.ONCE) {
     const ok = condition()
     if (isHydrating) {
-      branchShape = decodeIfShape(blockShape!, ok)
+      branchShape = decodeIfShape(flags, ok)
       hydrationCursor = enterHydrationCursor(
         branchShape === VaporBlockShape.MULTI_ROOT,
       )
@@ -47,22 +47,28 @@ export function createIf(
         : [__DEV__ ? createComment('if') : createTextNode()]
   } else {
     // DynamicFragment should be keyed for correct transition behavior
-    const keyed = index != null
+    // and KeepAlive cache identity. The encoded value is index + 1, so 0 is
+    // the unkeyed sentinel and source index 0 becomes encoded index 1.
+    const index = flags >> VaporIfFlags.INDEX_SHIFT
+    const keyed = index > 0
+    const keyBase = keyed ? (index - 1) * 2 : 0
+    const trackSlotBoundary = !!(flags & VaporIfFlags.SLOT_ROOT)
     frag =
       isHydrating || __DEV__
-        ? new DynamicFragment('if', keyed, false)
-        : new DynamicFragment(undefined, keyed, false)
+        ? new DynamicFragment('if', keyed, false, trackSlotBoundary)
+        : new DynamicFragment(undefined, keyed, false, trackSlotBoundary)
     renderEffect(() => {
       const ok = condition()
       if (isHydrating) {
-        branchShape = decodeIfShape(blockShape!, ok)
+        branchShape = decodeIfShape(flags, ok)
         hydrationCursor = enterHydrationCursor(
           branchShape === VaporBlockShape.MULTI_ROOT,
         )
       }
       ;(frag as DynamicFragment).update(
         ok ? b1 : b2,
-        keyed ? index * 2 + (ok ? 0 : 1) : undefined,
+        keyed ? keyBase + (ok ? 0 : 1) : undefined,
+        isNoScopeBranch(flags, ok),
       )
     })
   }
@@ -89,7 +95,7 @@ export function createIf(
   return frag
 }
 
-// The compiler packs the true/false branch shapes into one integer:
+// The compiler packs the true/false branch shapes into the low bits:
 //   packed = trueShape | (falseShape << 2)
 //
 // Each branch shape fits in 2 bits:
@@ -106,8 +112,14 @@ export function createIf(
 // - true branch:  shift by 0, then keep the low 2 bits -> 0b10
 // - false branch: shift by 2, then keep the low 2 bits -> 0b01
 //
-// `0b11` is the binary mask for the low 2 bits (decimal `3`).
-// `value & 0b11` clears everything except the active branch shape.
+// `0b11` clears everything except the active branch shape; no-scope and index
+// metadata live in higher bits and are decoded separately.
 function decodeIfShape(shape: number, ok: boolean): VaporBlockShape {
   return ((shape >> (ok ? 0 : 2)) & 0b11) as VaporBlockShape
+}
+
+function isNoScopeBranch(flags: number, ok: boolean): boolean {
+  return !!(
+    flags & (ok ? VaporIfFlags.TRUE_NO_SCOPE : VaporIfFlags.FALSE_NO_SCOPE)
+  )
 }

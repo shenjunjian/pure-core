@@ -24,7 +24,6 @@ import {
 } from '../dom/node'
 import {
   type LooseRawProps,
-  type LooseRawSlots,
   type VaporComponentInstance,
   currentInstance,
   isVaporComponent,
@@ -44,7 +43,7 @@ import {
   setCurrentHydrationNode,
 } from '../dom/hydration'
 import type { DefineVaporSetupFnComponent } from '../apiDefineComponent'
-import { getScopeOwner } from '../componentSlots'
+import { type RawSlots, getScopeOwner } from '../componentSlots'
 import { applyTransitionHooks, isTransitionEnabled } from '../transition'
 import { enableTeleport } from '../teleport'
 
@@ -53,10 +52,7 @@ const VaporTeleportImpl = {
   __isTeleport: true,
   __vapor: true,
 
-  process(
-    props: LooseRawProps,
-    slots?: LooseRawSlots | null,
-  ): TeleportFragment {
+  process(props: LooseRawProps, slots?: RawSlots | null): TeleportFragment {
     return new TeleportFragment(props, slots)
   },
 }
@@ -70,7 +66,7 @@ export class TeleportFragment extends VaporFragment {
   anchor?: Node
   private rawProps?: LooseRawProps
   private resolvedProps?: TeleportProps
-  private rawSlots?: LooseRawSlots | null
+  private rawSlots?: RawSlots | null
   isDisabled?: boolean
   private isMounted = false
   private childrenInitialized = false
@@ -88,7 +84,7 @@ export class TeleportFragment extends VaporFragment {
 
   private mountToTargetJob?: SchedulerJob
 
-  constructor(props: LooseRawProps, slots?: LooseRawSlots | null) {
+  constructor(props: LooseRawProps, slots?: RawSlots | null) {
     super([])
     this.rawProps = props
     this.rawSlots = slots
@@ -195,7 +191,10 @@ export class TeleportFragment extends VaporFragment {
     // teardown previous nodes
     remove(this.nodes, this.mountContainer!)
     // mount new nodes
-    insert((this.nodes = children), this.mountContainer!, this.mountAnchor!)
+    this.nodes = children
+    const onBeforeInsert = this.onBeforeInsert
+    if (onBeforeInsert) onBeforeInsert.forEach(fn => fn(this.nodes))
+    insert(children, this.mountContainer!, this.mountAnchor!)
     this.bindChildren(this.nodes)
     updateCssVars(this)
   }
@@ -214,6 +213,8 @@ export class TeleportFragment extends VaporFragment {
         MoveType.REORDER,
       )
     } else {
+      const onBeforeInsert = this.onBeforeInsert
+      if (onBeforeInsert) onBeforeInsert.forEach(fn => fn(this.nodes))
       insert(
         this.nodes,
         (this.mountContainer = parent),

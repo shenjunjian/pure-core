@@ -33,13 +33,19 @@ import {
 import { ShapeFlags, invokeArrayFns, isArray } from '@vue/shared'
 import { createElement } from '../dom/node'
 import { unsetRef } from '../refCleanup'
-import { type VaporFragment, isDynamicFragment, isFragment } from '../fragment'
+import {
+  type VaporFragment,
+  isDynamicFragment,
+  isFragment,
+  isInteropFragment,
+} from '../fragment'
 import type { EffectScope } from '@vue/reactivity'
 import { isInteropEnabled } from '../vdomInteropState'
 import {
   type VaporKeepAliveContext,
   currentCacheKey,
   setCurrentKeepAliveCtx,
+  withCurrentCacheKey,
   withKeepAliveEnabled,
 } from '../keepAlive'
 
@@ -384,9 +390,13 @@ const VaporKeepAliveImpl = defineVaporComponent({
     const prevCtx = setCurrentKeepAliveCtx(keepAliveCtx)
     let children = slots.default()
     setCurrentKeepAliveCtx(prevCtx)
+    registerDynamicFragmentHooks(children, keepAliveCtx)
 
     if (isArray(children)) {
       children = children.filter(child => !(child instanceof Comment))
+      if (children.length === 1) {
+        registerDynamicFragmentHooks(children[0], keepAliveCtx)
+      }
       if (children.length > 1) {
         if (__DEV__) {
           warn(`KeepAlive should contain exactly one component child.`)
@@ -401,6 +411,35 @@ const VaporKeepAliveImpl = defineVaporComponent({
 
 export const VaporKeepAlive: DefineVaporComponent<{}, string, KeepAliveProps> =
   /*@__PURE__*/ withKeepAliveEnabled(VaporKeepAliveImpl)
+
+function registerDynamicFragmentHooks(
+  block: Block,
+  keepAliveCtx: VaporKeepAliveContext,
+): void {
+  if (!isDynamicFragment(block)) return
+
+  ;(block.onBeforeRemove ||= []).push(scope => {
+    // If processShapeFlag returns a cache key, cache the scope and retain it.
+    const cacheKey = block.keyed
+      ? withCurrentCacheKey(block.current, () =>
+          keepAliveCtx.processShapeFlag(block.nodes),
+        )
+      : keepAliveCtx.processShapeFlag(block.nodes)
+    if (cacheKey !== false) {
+      keepAliveCtx.cacheScope(cacheKey, block.current, scope)
+      return true
+    }
+    return false
+  })
+
+  ;(block.onUpdated ||= []).unshift(() => {
+    if (block.$transition && block.$transition.mode === 'out-in') {
+      // For out-in transition, call cacheBlock after renderBranch completes
+      // because KeepAlive's onUpdated fires before the deferred rendering finishes.
+      keepAliveCtx.cacheBlock(block)
+    }
+  })
+}
 
 const shouldCache = (
   block: GenericComponentInstance | VaporFragment,
@@ -495,10 +534,6 @@ function getInnerBlock(block: Block): InnerBlockResult {
     return getInnerBlock(block.nodes)
   }
   return [undefined, false]
-}
-
-function isInteropFragment(block: Block): block is VaporFragment {
-  return !!(isFragment(block) && block.vnode)
 }
 
 function getInstanceFromCache(

@@ -8,7 +8,7 @@ import {
   resolveDynamicComponent,
   setCurrentRenderingInstance,
 } from '@vue/runtime-dom'
-import { ShapeFlags } from '@vue/shared'
+import { ShapeFlags, VaporDynamicComponentFlags } from '@vue/shared'
 import { insert, isBlock } from './block'
 import {
   type VaporComponentInstance,
@@ -17,7 +17,11 @@ import {
 } from './component'
 import { renderEffect } from './renderEffect'
 import type { RawProps } from './componentProps'
-import { type RawSlots, getScopeOwner } from './componentSlots'
+import {
+  type LooseRawSlots,
+  getScopeOwner,
+  normalizeRawSlots,
+} from './componentSlots'
 import {
   insertionAnchor,
   insertionParent,
@@ -38,10 +42,12 @@ import { enableKeepAlive } from './keepAlive'
 export function createDynamicComponent(
   getter: () => any,
   rawProps?: RawProps | null,
-  rawSlots?: RawSlots | null,
-  isSingleRoot?: boolean,
-  once?: boolean,
+  rawSlots?: LooseRawSlots | null,
+  flags: number = 0,
 ): VaporFragment {
+  const isSingleRoot = !!(flags & VaporDynamicComponentFlags.SINGLE_ROOT)
+  const once = !!(flags & VaporDynamicComponentFlags.ONCE)
+  const slotRoot = !!(flags & VaporDynamicComponentFlags.SLOT_ROOT)
   const _insertionParent = insertionParent
   const _insertionAnchor = insertionAnchor
   if (!isHydrating) resetInsertionState()
@@ -51,9 +57,10 @@ export function createDynamicComponent(
 
   const frag =
     isHydrating || __DEV__
-      ? new DynamicFragment('dynamic-component')
-      : new DynamicFragment()
+      ? new DynamicFragment('dynamic-component', false, true, slotRoot)
+      : new DynamicFragment(undefined, false, true, slotRoot)
 
+  const normalizedRawSlots = normalizeRawSlots(rawSlots)
   const scopeOwner = getScopeOwner()
   const renderFn = () => {
     const value = getter()
@@ -84,7 +91,7 @@ export function createDynamicComponent(
       return createComponentWithFallback(
         withScopeOwner(scopeOwner, () => resolveDynamicComponent(value)),
         rawProps,
-        rawSlots,
+        normalizedRawSlots,
         isSingleRoot,
         once,
         appContext,

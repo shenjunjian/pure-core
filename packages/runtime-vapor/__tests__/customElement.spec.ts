@@ -1,5 +1,6 @@
 import type { MockedFunction } from 'vitest'
 import type { VaporElement } from '../src/apiDefineCustomElement'
+import { VaporSlotFlags } from '@vue/shared'
 import {
   type HMRRuntime,
   type Ref,
@@ -32,7 +33,6 @@ import {
   setValue,
   template,
   txt,
-  withVaporCtx,
 } from '../src'
 
 declare var __VUE_HMR_RUNTIME__: HMRRuntime
@@ -830,6 +830,35 @@ describe('defineVaporCustomElement', () => {
       await nextTick()
       expect(e.shadowRoot!.innerHTML).toBe(
         `<div><slot class="bar"></slot><!--slot--></div>`,
+      )
+    })
+
+    test('applies v-once to slot props', async () => {
+      const foo = ref('foo')
+      const E = defineVaporCustomElement({
+        setup() {
+          const n0 = template('<div></div>')() as any
+          setInsertionState(n0, null)
+          createSlot(
+            'default',
+            { class: () => foo.value },
+            undefined,
+            VaporSlotFlags.ONCE,
+          )
+          return [n0]
+        },
+      })
+      customElements.define('my-el-slot-props-once', E)
+      container.innerHTML = `<my-el-slot-props-once><span>hi</span></my-el-slot-props-once>`
+      const e = container.childNodes[0] as VaporElement
+      expect(e.shadowRoot!.innerHTML).toBe(
+        `<div><slot class="foo"></slot><!--slot--></div>`,
+      )
+
+      foo.value = 'bar'
+      await nextTick()
+      expect(e.shadowRoot!.innerHTML).toBe(
+        `<div><slot class="foo"></slot><!--slot--></div>`,
       )
     })
   })
@@ -1801,11 +1830,10 @@ describe('defineVaporCustomElement', () => {
       const App = {
         setup() {
           return createPlainElement('my-parent', null, {
-            default: withVaporCtx(() =>
+            default: () =>
               createPlainElement('my-child', null, {
                 default: () => template('<span>default</span>')(),
               }),
-            ),
           })
         },
       }
@@ -1834,7 +1862,7 @@ describe('defineVaporCustomElement', () => {
               VaporTeleport,
               { to: () => target },
               {
-                default: withVaporCtx(() => createSlot('default')),
+                default: () => createSlot('default'),
               },
             )
           },
@@ -1855,11 +1883,10 @@ describe('defineVaporCustomElement', () => {
       const App = {
         setup() {
           return createPlainElement('my-el-teleport-parent', null, {
-            default: withVaporCtx(() =>
+            default: () =>
               createPlainElement('my-el-teleport-child', null, {
                 default: () => template('<span>default</span>')(),
               }),
-            ),
           })
         },
       }
@@ -1881,14 +1908,14 @@ describe('defineVaporCustomElement', () => {
                 VaporTeleport,
                 { to: () => target1 },
                 {
-                  default: withVaporCtx(() => createSlot('header')),
+                  default: () => createSlot('header'),
                 },
               ),
               createComponent(
                 VaporTeleport,
                 { to: () => target2 },
                 {
-                  default: withVaporCtx(() => createSlot('body')),
+                  default: () => createSlot('body'),
                 },
               ),
             ]
@@ -1932,14 +1959,14 @@ describe('defineVaporCustomElement', () => {
                 // with disabled: true
                 { to: () => target1, disabled: () => true },
                 {
-                  default: withVaporCtx(() => createSlot('header')),
+                  default: () => createSlot('header'),
                 },
               ),
               createComponent(
                 VaporTeleport,
                 { to: () => target2 },
                 {
-                  default: withVaporCtx(() => createSlot('body')),
+                  default: () => createSlot('body'),
                 },
               ),
             ]
@@ -2023,7 +2050,7 @@ describe('defineVaporCustomElement', () => {
             'my-el-parent-shadow-false',
             { isShown: () => props.isShown },
             {
-              default: withVaporCtx(() => createSlot('default')),
+              default: () => createSlot('default'),
             },
           )
         },
@@ -2036,7 +2063,7 @@ describe('defineVaporCustomElement', () => {
             ParentWrapper,
             { isShown: () => isShown.value },
             {
-              default: withVaporCtx(() => createComponent(ChildWrapper)),
+              default: () => createComponent(ChildWrapper),
             },
           )
         },

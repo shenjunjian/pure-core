@@ -10,10 +10,10 @@ import {
   setStyle,
   template,
   useVaporCssVars,
-  withVaporCtx,
 } from '@vue/runtime-vapor'
 import { nextTick, onMounted, reactive, ref } from '@vue/runtime-core'
-import { makeRender } from '../_utils'
+import { VaporBlockShape } from '@vue/shared'
+import { ifFlags, makeRender } from '../_utils'
 import type { VaporComponent } from '../../src/component'
 
 const define = makeRender()
@@ -210,7 +210,7 @@ describe('useVaporCssVars', () => {
       setup() {
         useVaporCssVars(() => state)
         return createComponent(Child, null, {
-          default: withVaporCtx(() =>
+          default: () =>
             createComponent(
               VaporTeleport,
               { to: () => target },
@@ -218,7 +218,6 @@ describe('useVaporCssVars', () => {
                 default: () => template('<div></div>', 1)(),
               },
             ),
-          ),
         })
       },
     }).render()
@@ -253,7 +252,7 @@ describe('useVaporCssVars', () => {
       setup() {
         useVaporCssVars(() => parentState)
         return createComponent(Child, null, {
-          default: withVaporCtx(() =>
+          default: () =>
             createComponent(
               VaporTeleport,
               { to: () => target },
@@ -266,7 +265,6 @@ describe('useVaporCssVars', () => {
                   ),
               },
             ),
-          ),
         })
       },
     }).render()
@@ -547,8 +545,7 @@ describe('useVaporCssVars', () => {
             return n2
           },
           null as any,
-          undefined,
-          true,
+          ifFlags(VaporBlockShape.SINGLE_ROOT, true),
         )
       },
     }).render({}, root)

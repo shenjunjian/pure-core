@@ -1,4 +1,5 @@
 import { ErrorCodes, NodeTypes } from '@vue/compiler-dom'
+import { VaporSlotFlags } from '@vue/shared'
 import {
   IRNodeTypes,
   transformChildren,
@@ -6,6 +7,8 @@ import {
   transformSlotOutlet,
   transformText,
   transformVBind,
+  transformVFor,
+  transformVIf,
   transformVOn,
   transformVShow,
 } from '../../src'
@@ -14,6 +17,8 @@ import { makeCompile } from './_utils'
 const compileWithSlotsOutlet = makeCompile({
   nodeTransforms: [
     transformText,
+    transformVIf,
+    transformVFor,
     transformSlotOutlet,
     transformElement,
     transformChildren,
@@ -28,6 +33,7 @@ const compileWithSlotsOutlet = makeCompile({
 describe('compiler: transform <slot> outlets', () => {
   test('default slot outlet', () => {
     const { ir, code, helpers } = compileWithSlotsOutlet(`<slot />`)
+    expect(code).toContain(`const n0 = _createSlot()`)
     expect(code).toMatchSnapshot()
     expect(helpers).toContain('createSlot')
     expect(ir.block.effect).toEqual([])
@@ -90,6 +96,9 @@ describe('compiler: transform <slot> outlets', () => {
     const { ir, code } = compileWithSlotsOutlet(
       `<slot foo="bar" :baz="qux" :foo-bar="foo-bar" />`,
     )
+    expect(code).toContain(`foo: "bar"`)
+    expect(code).toContain(`baz: () => (_ctx.qux)`)
+    expect(code).toContain(`fooBar: () => (_ctx.foo-_ctx.bar)`)
     expect(code).toMatchSnapshot()
     expect(ir.block.dynamic.children[0].operation).toMatchObject({
       type: IRNodeTypes.SLOT_OUTLET_NODE,
@@ -108,6 +117,8 @@ describe('compiler: transform <slot> outlets', () => {
     const { ir, code } = compileWithSlotsOutlet(
       `<slot name="foo" foo="bar" :baz="qux" />`,
     )
+    expect(code).toContain(`foo: "bar"`)
+    expect(code).toContain(`baz: () => (_ctx.qux)`)
     expect(code).toMatchSnapshot()
     expect(ir.block.dynamic.children[0].operation).toMatchObject({
       type: IRNodeTypes.SLOT_OUTLET_NODE,
@@ -232,6 +243,36 @@ describe('compiler: transform <slot> outlets', () => {
     })
   })
 
+  test('root v-if fallback', () => {
+    const { code } = compileWithSlotsOutlet(`<slot><span v-if="ok"/></slot>`)
+
+    expect(code).toMatchSnapshot()
+  })
+
+  test('nested root v-for fallback', () => {
+    const { code } = compileWithSlotsOutlet(
+      `<slot><template v-if="ok"><span v-for="item in items">{{ item }}</span></template></slot>`,
+    )
+
+    expect(code).toMatchSnapshot()
+  })
+
+  test('does not mark non-root fallback v-if as slot root', () => {
+    const { code } = compileWithSlotsOutlet(
+      `<slot><div><span v-if="ok"/></div></slot>`,
+    )
+
+    expect(code).toMatchSnapshot()
+  })
+
+  test('root dynamic component fallback', () => {
+    const { code } = compileWithSlotsOutlet(
+      `<slot><component :is="view" /></slot>`,
+    )
+
+    expect(code).toMatchSnapshot()
+  })
+
   test('error on unexpected custom directive on <slot>', () => {
     const onError = vi.fn()
     const source = `<slot v-foo />`
@@ -284,7 +325,7 @@ describe('compiler: transform <slot> outlets', () => {
       slotted: false,
     })
     expect(code).toMatchSnapshot()
-    expect(code).toContain('true')
+    expect(code).toContain(String(VaporSlotFlags.NO_SLOTTED))
     expect(ir.block.dynamic.children[0].operation).toMatchObject({
       type: IRNodeTypes.SLOT_OUTLET_NODE,
       id: 0,
@@ -295,7 +336,7 @@ describe('compiler: transform <slot> outlets', () => {
       },
       props: [],
       fallback: undefined,
-      noSlotted: true,
+      flags: VaporSlotFlags.NO_SLOTTED,
     })
   })
 
@@ -315,7 +356,7 @@ describe('compiler: transform <slot> outlets', () => {
       },
       props: [],
       fallback: undefined,
-      noSlotted: false,
+      flags: 0,
     })
   })
 
@@ -334,7 +375,7 @@ describe('compiler: transform <slot> outlets', () => {
       },
       props: [],
       fallback: undefined,
-      noSlotted: false,
+      flags: 0,
     })
   })
 })

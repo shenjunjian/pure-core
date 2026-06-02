@@ -1,7 +1,12 @@
 import {
   child,
+  createComponent,
+  createDynamicComponent,
   createFor,
   createIf,
+  createKeyedFragment,
+  createSlot,
+  defineVaporComponent,
   getDefaultValue,
   getRestElement,
   renderEffect,
@@ -14,6 +19,8 @@ import {
 import {
   type Ref,
   nextTick,
+  onScopeDispose,
+  onUnmounted,
   reactive,
   readonly,
   ref,
@@ -22,6 +29,7 @@ import {
   triggerRef,
 } from '@vue/runtime-dom'
 import { makeRender, shuffle } from './_utils'
+import { VaporVForFlags } from '@vue/shared'
 
 const define = makeRender()
 
@@ -239,6 +247,46 @@ describe('createFor', () => {
     expect(host.innerHTML).toBe('<!--for-->')
   })
 
+  test('non-integer number source warns and renders empty', () => {
+    const { host } = define(() => {
+      return createFor(
+        () => 3.1,
+        item => {
+          const span = document.createElement('li')
+          renderEffect(() => {
+            span.innerHTML = `${item.value}`
+          })
+          return span
+        },
+      )
+    }).render()
+
+    expect(host.innerHTML).toBe('<!--for-->')
+    expect(
+      `The v-for range expects a positive integer value but got 3.1.`,
+    ).toHaveBeenWarned()
+  })
+
+  test('negative number source warns and renders empty', () => {
+    const { host } = define(() => {
+      return createFor(
+        () => -1,
+        item => {
+          const span = document.createElement('li')
+          renderEffect(() => {
+            span.innerHTML = `${item.value}`
+          })
+          return span
+        },
+      )
+    }).render()
+
+    expect(host.innerHTML).toBe('<!--for-->')
+    expect(
+      `The v-for range expects a positive integer value but got -1.`,
+    ).toHaveBeenWarned()
+  })
+
   test('object source', async () => {
     const initial = () => ({ a: 1, b: 2, c: 3 })
     const data = ref<Record<string, number>>(initial())
@@ -301,6 +349,55 @@ describe('createFor', () => {
     data.value = {}
     await nextTick()
     expect(host.innerHTML).toBe('<!--for-->')
+  })
+
+  test('unkeyed object source updates key and index aliases', async () => {
+    const data = ref<Record<string, number>>({ a: 1 })
+
+    const { host } = define(() => {
+      return createFor(
+        () => data.value,
+        (item, key, index) => {
+          const span = document.createElement('li')
+          renderEffect(() => {
+            span.innerHTML = `${key.value}${index.value}. ${item.value}`
+          })
+          return span
+        },
+      )
+    }).render()
+
+    expect(host.innerHTML).toBe('<li>a0. 1</li><!--for-->')
+
+    data.value = { b: 2 }
+    await nextTick()
+
+    expect(host.innerHTML).toBe('<li>b0. 2</li><!--for-->')
+  })
+
+  test('keyed object source updates key and index aliases when reusing a block', async () => {
+    const data = ref<Record<string, number>>({ a: 1, c: 3 })
+
+    const { host } = define(() => {
+      return createFor(
+        () => data.value,
+        (item, key, index) => {
+          const span = document.createElement('li')
+          renderEffect(() => {
+            span.innerHTML = `${key.value}${index.value}. ${item.value}`
+          })
+          return span
+        },
+        item => item,
+      )
+    }).render()
+
+    expect(host.innerHTML).toBe('<li>a0. 1</li><li>c1. 3</li><!--for-->')
+
+    data.value = { b: 1, d: 4 }
+    await nextTick()
+
+    expect(host.innerHTML).toBe('<li>b0. 1</li><li>d1. 4</li><!--for-->')
   })
 
   test('de-structured value', async () => {
@@ -446,6 +543,7 @@ describe('createFor', () => {
 
   test('de-structured value (default value)', async () => {
     const list = ref<any[]>([{ name: '1' }, { name: '2' }, { name: '3' }])
+    const getDefault = vi.fn(() => '0')
 
     const { host } = define(() => {
       const n1 = createFor(
@@ -453,7 +551,7 @@ describe('createFor', () => {
         (item, _key, index) => {
           const span = document.createElement('li')
           renderEffect(() => {
-            span.innerHTML = getDefaultValue(item.value.x, '0')
+            span.innerHTML = getDefaultValue(item.value.x, getDefault)
             // index should be undefined if source is not an object
             expect(index.value).toBe(undefined)
           })
@@ -465,11 +563,13 @@ describe('createFor', () => {
     }).render()
 
     expect(host.innerHTML).toBe('<li>0</li><li>0</li><li>0</li><!--for-->')
+    expect(getDefault).toHaveBeenCalledTimes(3)
 
     // change
     list.value[0].x = 5
     await nextTick()
     expect(host.innerHTML).toBe('<li>5</li><li>0</li><li>0</li><!--for-->')
+    expect(getDefault).toHaveBeenCalledTimes(3)
 
     // clear
     list.value = []
@@ -825,6 +925,36 @@ describe('createFor', () => {
     list.value = null
     await nextTick()
     expect(host.innerHTML).toBe('<!--for-->')
+  })
+
+  test('should track key dependencies for keyed diff', async () => {
+    const list = ref([{ id: 1, opened: false }])
+    const calls: string[] = []
+
+    const { host } = define(() => {
+      return createFor(
+        () => list.value,
+        item => {
+          const label = `${item.value.id}-${item.value.opened}`
+          calls.push(`mount ${label}`)
+          onScopeDispose(() => calls.push(`unmount ${label}`))
+
+          const span = document.createElement('span')
+          span.textContent = label
+          return span
+        },
+        item => `${item.id}-${item.opened}`,
+      )
+    }).render()
+
+    expect(host.innerHTML).toBe('<span>1-false</span><!--for-->')
+    expect(calls).toEqual(['mount 1-false'])
+
+    list.value[0].opened = true
+    await nextTick()
+
+    expect(host.innerHTML).toBe('<span>1-true</span><!--for-->')
+    expect(calls).toEqual(['mount 1-false', 'unmount 1-false', 'mount 1-true'])
   })
 
   describe('readonly source', () => {
@@ -1601,6 +1731,278 @@ describe('createFor', () => {
       await nextTick()
       expect(html()).toBe(
         '<span>three</span><span>two</span><span>one</span><!--for-->',
+      )
+    })
+  })
+
+  describe('specialized block paths', () => {
+    const createTextSpan = (text: () => string) => {
+      const n2 = template('<span> </span>', 1)() as any
+      const x2 = child(n2) as any
+      renderEffect(() => setText(x2, text()))
+      return n2
+    }
+
+    test('single DOM node blocks can be reordered and removed', async () => {
+      const items = ref([
+        { id: 'a', text: 'A' },
+        { id: 'b', text: 'B' },
+        { id: 'c', text: 'C' },
+      ])
+
+      const { host, html } = define(() => {
+        return createFor(
+          () => items.value,
+          _for_item0 => createTextSpan(() => _for_item0.value.text),
+          item => item.id,
+          VaporVForFlags.IS_SINGLE_NODE,
+        )
+      }).render()
+      const firstNode = host.children[0]
+
+      expect(html()).toBe(
+        '<span>A</span><span>B</span><span>C</span><!--for-->',
+      )
+
+      items.value = [
+        { id: 'c', text: 'C' },
+        { id: 'a', text: 'A' },
+      ]
+      await nextTick()
+
+      expect(html()).toBe('<span>C</span><span>A</span><!--for-->')
+      expect(host.children[1]).toBe(firstNode)
+    })
+
+    test('dynamic component fragments can be reordered and removed', async () => {
+      const CompA = defineVaporComponent({
+        setup() {
+          return template('<i>A</i>')()
+        },
+      })
+      const CompB = defineVaporComponent({
+        setup() {
+          return template('<b>B</b>')()
+        },
+      })
+      const CompC = defineVaporComponent({
+        setup() {
+          return template('<em>C</em>')()
+        },
+      })
+      const items = ref([
+        { id: 'a', comp: CompA },
+        { id: 'b', comp: CompB },
+        { id: 'c', comp: CompC },
+      ])
+
+      const { html } = define(() => {
+        return createFor(
+          () => items.value,
+          _for_item0 => createDynamicComponent(() => _for_item0.value.comp),
+          item => item.id,
+          VaporVForFlags.IS_FRAGMENT,
+        )
+      }).render()
+
+      expect(html()).toBe(
+        '<i>A</i><!--dynamic-component-->' +
+          '<b>B</b><!--dynamic-component-->' +
+          '<em>C</em><!--dynamic-component--><!--for-->',
+      )
+
+      items.value = [
+        { id: 'c', comp: CompC },
+        { id: 'a', comp: CompA },
+      ]
+      await nextTick()
+
+      expect(html()).toBe(
+        '<em>C</em><!--dynamic-component-->' +
+          '<i>A</i><!--dynamic-component--><!--for-->',
+      )
+    })
+
+    test('component blocks are unmounted when clearing with fast remove', async () => {
+      const items = ref([1, 2])
+      const unmounted = vi.fn()
+      const Child = defineVaporComponent({
+        setup() {
+          onUnmounted(unmounted)
+          return template('<span>child</span>')()
+        },
+      })
+
+      const { html } = define(() => {
+        return createFor(
+          () => items.value,
+          () => createComponent(Child),
+          undefined,
+          VaporVForFlags.FAST_REMOVE | VaporVForFlags.IS_COMPONENT,
+        )
+      }).render()
+
+      expect(html()).toBe('<span>child</span><span>child</span><!--for-->')
+
+      items.value = []
+      await nextTick()
+
+      expect(html()).toBe('<!--for-->')
+      expect(unmounted).toHaveBeenCalledTimes(2)
+    })
+
+    test('slot fallback fragments can be reordered and removed', async () => {
+      const items = ref([
+        { id: 'a', text: 'A' },
+        { id: 'b', text: 'B' },
+        { id: 'c', text: 'C' },
+      ])
+      const Child = defineVaporComponent({
+        setup() {
+          return createFor(
+            () => items.value,
+            _for_item0 =>
+              createSlot('default', null, () =>
+                createTextSpan(() => _for_item0.value.text),
+              ),
+            item => item.id,
+            VaporVForFlags.IS_FRAGMENT,
+          )
+        },
+      })
+
+      const { html } = define(() => createComponent(Child)).render()
+
+      expect(html()).toBe(
+        '<span>A</span><!--slot-->' +
+          '<span>B</span><!--slot-->' +
+          '<span>C</span><!--slot--><!--for-->',
+      )
+
+      items.value = [
+        { id: 'c', text: 'C' },
+        { id: 'a', text: 'A' },
+      ]
+      await nextTick()
+
+      expect(html()).toBe(
+        '<span>C</span><!--slot--><span>A</span><!--slot--><!--for-->',
+      )
+    })
+
+    test('keyed fragments can be reordered and removed', async () => {
+      const items = ref([
+        { id: 'a', text: 'A' },
+        { id: 'b', text: 'B' },
+        { id: 'c', text: 'C' },
+      ])
+
+      const { html } = define(() => {
+        return createFor(
+          () => items.value,
+          _for_item0 =>
+            createKeyedFragment(
+              () => _for_item0.value.id,
+              () => createTextSpan(() => _for_item0.value.text),
+            ),
+          item => item.id,
+          VaporVForFlags.IS_FRAGMENT,
+        )
+      }).render()
+
+      expect(html()).toBe(
+        '<span>A</span><!--keyed-->' +
+          '<span>B</span><!--keyed-->' +
+          '<span>C</span><!--keyed--><!--for-->',
+      )
+
+      items.value = [
+        { id: 'c', text: 'C' },
+        { id: 'a', text: 'A' },
+      ]
+      await nextTick()
+
+      expect(html()).toBe(
+        '<span>C</span><!--keyed--><span>A</span><!--keyed--><!--for-->',
+      )
+    })
+
+    test('nested v-for fragments can switch between empty and non-empty children', async () => {
+      const groups = ref([
+        { id: 'a', children: [1] },
+        { id: 'b', children: [] },
+        { id: 'c', children: [3] },
+      ])
+
+      const { html } = define(() => {
+        return createFor(
+          () => groups.value,
+          _for_item0 =>
+            createFor(
+              () => _for_item0.value.children,
+              _for_item1 =>
+                createTextSpan(
+                  () => `${_for_item0.value.id}:${_for_item1.value}`,
+                ),
+              item => item,
+              VaporVForFlags.IS_SINGLE_NODE,
+            ),
+          item => item.id,
+          VaporVForFlags.IS_FRAGMENT,
+        )
+      }).render()
+
+      expect(html()).toBe(
+        '<span>a:1</span><!--for--><!--for--><span>c:3</span><!--for--><!--for-->',
+      )
+
+      groups.value = [
+        { id: 'b', children: [2] },
+        { id: 'c', children: [] },
+        { id: 'a', children: [] },
+      ]
+      await nextTick()
+
+      expect(html()).toBe(
+        '<span>b:2</span><!--for--><!--for--><!--for--><!--for-->',
+      )
+    })
+
+    test('nested empty v-for fragment can be used as insertion anchor', async () => {
+      const groups = ref([
+        { id: 'a', children: [] },
+        { id: 'b', children: [2] },
+      ])
+
+      const { html } = define(() => {
+        return createFor(
+          () => groups.value,
+          _for_item0 =>
+            createFor(
+              () => _for_item0.value.children,
+              _for_item1 =>
+                createTextSpan(
+                  () => `${_for_item0.value.id}:${_for_item1.value}`,
+                ),
+              item => item,
+              VaporVForFlags.IS_SINGLE_NODE,
+            ),
+          item => item.id,
+          VaporVForFlags.IS_FRAGMENT,
+        )
+      }).render()
+
+      expect(html()).toBe('<!--for--><span>b:2</span><!--for--><!--for-->')
+
+      groups.value = [
+        { id: 'd', children: [4] },
+        { id: 'a', children: [] },
+        { id: 'b', children: [2] },
+      ]
+      await nextTick()
+
+      expect(html()).toBe(
+        '<span>d:4</span><!--for--><!--for--><span>b:2</span><!--for--><!--for-->',
       )
     })
   })
