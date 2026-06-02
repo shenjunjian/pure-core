@@ -6,7 +6,7 @@ import vueLogo from "../assets/vue.svg";
  
 const count = ref(0);
 const centerRef = ref(null);
-
+const html = ref('<span>span v-html injected</span>');
 onMounted(() => {
   console.log(centerRef.value);
 });
@@ -25,6 +25,7 @@ onMounted(() => {
     </div>
     <button type="button" class="counter" @click="count++">Count is {{ count }}</button>
   </section>
+  <div id="html-injected" v-html="html"></div>
 
   <slot name="default" />
 

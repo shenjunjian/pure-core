@@ -51,7 +51,7 @@ export function setComponentScopeId(instance) {
   const scopeId = instance.scopeId
   if (!parent || !scopeId) return
 
-  // 多根 fragment 不在此处理
+  // 多根 fragment 不在此处理,编译已经有scopeid,比如helloworld组件, 在此直接返回
   if (isArray(instance.block) && instance.block.length > 1) return
 
   const scopeIds = []

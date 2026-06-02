@@ -41,7 +41,9 @@ export function isValidBlock(block) {
   }
 }
 
+/** 插入block到父节点中 */
 export function insert(block, parent, anchor = null) {
+  console.log('enter insert:     ', block, parent, anchor)
   anchor = anchor === 0 ? parent.$fc || _child(parent) : anchor
   if (block instanceof Node) {
     domInsert(parent, block, anchor)
@@ -53,9 +55,13 @@ export function insert(block, parent, anchor = null) {
     }
   } else if (isArray(block)) {
     for (let i = 0; i < block.length; i++) {
+      console.log('enter insert array:     ', block[i], parent, anchor)
       insert(block[i], parent, anchor)
     }
   } else {
+    // todo  什么时候会进入else逻辑？？
+    // 1. SlotFragment
+    debugger
     if (block.anchor) {
       insert(block.anchor, parent, anchor)
       anchor = block.anchor

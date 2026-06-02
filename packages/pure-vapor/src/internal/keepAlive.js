@@ -1,4 +1,4 @@
-import { isArray, isRegExp, isString, ShapeFlags } from '@vue/shared'
+import { ShapeFlags, isArray, isRegExp, isString } from '@vue/shared'
 
 export function isKeepAlive(instance) {
   const type = instance && (instance.type || instance)

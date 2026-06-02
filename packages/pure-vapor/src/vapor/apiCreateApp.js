@@ -30,6 +30,7 @@ let uid = 0
 
 export function createVaporApp(rootComponent, rootProps = null) {
   if (!isFunction(rootComponent)) {
+    // 不污染用户导出的原始对象， 与 HMR / 热更新兼容,可能与SSR兼容
     rootComponent = extend({}, rootComponent)
   }
 
@@ -184,7 +185,7 @@ export function createVaporApp(rootComponent, rootProps = null) {
         if (container) {
           container.__vue_app__ = app
           if (container instanceof Element) {
-            container.removeAttribute('v-cloak')
+            container.removeAttribute('v-cloak') // 建议手写在这里，框架负责删除： <div id="app" v-cloak></div>
             container.setAttribute('data-v-app', '')
           }
         }

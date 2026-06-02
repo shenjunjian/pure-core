@@ -268,6 +268,11 @@ function setTextToBlock(block, value) {
   }
 }
 
+/**
+ * 设置 DOM 元素的 innerHTML。
+ * 它只处理真实的 DOM 元素（Node），不做递归或类型判断。
+ * 适用场景：直接操作真实 DOM 元素，如根节点或已知是 Element 的节点。
+ */
 export function setHtml(el, value) {
   value = value == null ? '' : unsafeToTrustedHTML(value)
   if (el.$html !== value) {
@@ -276,6 +281,13 @@ export function setHtml(el, value) {
   }
 }
 
+/**
+ * 设置 block（Vapor 渲染块）的 innerHTML。
+ * - Node：是 Element 则直接设置，否则开发模式下警告。
+ * - Vapor 组件：取其 block 继续递归。
+ * - 数组：开发模式下警告（不能直接对数组设置 innerHTML）。
+ * - 其他（Block 对象）：取其 nodes 继续递归。
+ */
 export function setBlockHtml(block, value) {
   value = value == null ? '' : unsafeToTrustedHTML(value)
   if (block.$html !== value) {
@@ -283,6 +295,9 @@ export function setBlockHtml(block, value) {
   }
 }
 
+/**
+ * 私有方法： 递归查找真正的 DOM Element 并设置 innerHTML
+ *  */
 function setHtmlToBlock(block, value) {
   if (block instanceof Node) {
     if (block instanceof Element) {

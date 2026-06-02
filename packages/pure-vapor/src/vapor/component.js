@@ -674,11 +674,13 @@ function handleSetupResult(setupResult, component, instance) {
     }
   }
 
+  // 如果有额外的属性，则需要应用到根元素上。
   if (
     instance.hasFallthrough &&
     component.inheritAttrs !== false &&
     Object.keys(instance.attrs).length
   ) {
+    // helloworld组件，这里返回的undefined
     const root = getRootElement(
       instance.block,
       frag => {
