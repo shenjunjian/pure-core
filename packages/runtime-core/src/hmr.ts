@@ -98,6 +98,20 @@ function normalizeClassComponent(component: HMRComponent): ComponentOptions {
   return isClassComponent(component) ? component.__vccOpts : component
 }
 
+function hasDirtyAncestor(
+  instance: GenericComponentInstance,
+  dirtyInstances: Set<GenericComponentInstance>,
+): boolean {
+  let parent = instance.parent
+  while (parent) {
+    if (dirtyInstances.has(parent)) {
+      return true
+    }
+    parent = parent.parent
+  }
+  return false
+}
+
 function rerender(id: string, newRender?: Function): void {
   const record = map.get(id)
   if (!record) {
@@ -143,7 +157,13 @@ function reload(id: string, newComp: HMRComponent): void {
   // create a snapshot which avoids the set being mutated during updates
   const instances = [...record.instances]
 
-  if (isVapor && newComp.__vapor && !instances.some(i => i.ceReload)) {
+  if (
+    isVapor &&
+    newComp.__vapor &&
+    // VDOM parents need the VDOM HMR path to remount dirty Vapor children.
+    !instances.some(instance => instance.parent && !instance.parent.vapor) &&
+    !instances.some(i => i.ceReload)
+  ) {
     // For multiple instances with the same __hmrId, remove styles first before reload
     // to avoid the second instance's style removal deleting the first instance's
     // newly added styles (since hmrReload is synchronous)
@@ -153,10 +173,30 @@ function reload(id: string, newComp: HMRComponent): void {
         instance.root.ce._removeChildStyle(instance.type)
       }
     }
+    const dirtyInstances = new Set(instances)
+    const rerenderedParents = new Set<GenericComponentInstance>()
     for (const instance of instances) {
-      instance.hmrReload!(newComp)
+      const parent = instance.parent
+      if (parent) {
+        // A dirty ancestor will recreate this child. Otherwise, each parent
+        // only needs one rerender for this HMR record.
+        if (
+          !hasDirtyAncestor(instance, dirtyInstances) &&
+          !rerenderedParents.has(parent)
+        ) {
+          rerenderedParents.add(parent)
+          parent.hmrRerender!()
+        }
+      } else {
+        instance.hmrReload!(newComp)
+      }
     }
   } else {
+    const parentUpdates = new Map<
+      GenericComponentInstance,
+      [GenericComponentInstance, Set<GenericComponentInstance>][]
+    >()
+    const dirtyInstanceSet = new Set(instances)
     for (const instance of instances as ComponentInternalInstance[]) {
       const oldComp = normalizeClassComponent(instance.type as HMRComponent)
 
@@ -188,23 +228,14 @@ function reload(id: string, newComp: HMRComponent): void {
         // 4. Force the parent instance to re-render. This will cause all updated
         // components to be unmounted and re-mounted. Queue the update so that we
         // don't end up forcing the same parent to re-render multiple times.
-        queueJob(() => {
-          isHmrUpdating = true
-          const parent = instance.parent! as ComponentInternalInstance
-          if (parent.vapor) {
-            parent.hmrRerender!()
-          } else {
-            if (!(parent.effect.flags! & EffectFlags.STOP)) {
-              parent.renderCache = []
-              parent.effect.run()
-            }
+        const parent = instance.parent
+        if (!hasDirtyAncestor(instance, dirtyInstanceSet)) {
+          let updates = parentUpdates.get(parent)
+          if (!updates) {
+            parentUpdates.set(parent, (updates = []))
           }
-          nextTick(() => {
-            isHmrUpdating = false
-          })
-          // #6930, #11248 avoid infinite recursion
-          dirtyInstances.delete(instance)
-        })
+          updates.push([instance, dirtyInstances])
+        }
       } else if (instance.appContext.reload) {
         // root instance mounted via createApp() has a reload method
         instance.appContext.reload()
@@ -222,6 +253,27 @@ function reload(id: string, newComp: HMRComponent): void {
         instance.root.ce._removeChildStyle(oldComp)
       }
     }
+    parentUpdates.forEach((updates, parent) => {
+      queueJob(() => {
+        isHmrUpdating = true
+        if (parent.vapor) {
+          parent.hmrRerender!()
+        } else {
+          const i = parent as ComponentInternalInstance
+          if (!(i.effect.flags! & EffectFlags.STOP)) {
+            i.renderCache = []
+            i.effect.run()
+          }
+        }
+        nextTick(() => {
+          isHmrUpdating = false
+        })
+        // #6930, #11248 avoid infinite recursion
+        updates.forEach(([instance, dirtyInstances]) => {
+          dirtyInstances.delete(instance)
+        })
+      })
+    })
   }
   // 5. make sure to cleanup dirty hmr components after update
   queuePostFlushCb(() => {

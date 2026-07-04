@@ -4,7 +4,10 @@ import {
   setBlockKey,
   template,
 } from '../../src'
-import { resolveTransitionBlock } from '../../src/components/Transition'
+import {
+  resolveTransitionBlock,
+  resolveTransitionBlocks,
+} from '../../src/components/Transition'
 import { nextTick, ref } from 'vue'
 import { compile, makeInteropRender, makeRender } from '../_utils'
 
@@ -54,7 +57,7 @@ describe('Transition', () => {
     expect(resolved.$key).toBe('foo')
   })
 
-  test('falls back to component uid when explicit key is absent', () => {
+  test('keeps unkeyed child key undefined (shares leaving bucket by type)', () => {
     const Child = defineVaporComponent({
       setup() {
         return template(`<div>child</div>`)() as any
@@ -71,8 +74,11 @@ describe('Transition', () => {
 
     child.block.$key = undefined
 
+    // No explicit key: the resolved child must stay unkeyed so successive
+    // instances of the same component type share the leaving-cache bucket
+    // and earlyRemove can match the previous still-leaving instance.
     const resolved = resolveTransitionBlock(child)!
-    expect(resolved.$key).toBe(child.uid)
+    expect(resolved.$key).toBeUndefined()
   })
 
   test('preserves falsy explicit component key when resolving child', () => {
@@ -115,8 +121,119 @@ describe('Transition', () => {
 
     child.block.$key = null
 
+    // A null key counts as absent and must not fall back to uid; the resolved
+    // child keeps its nullish key (stable across same-type instances, so it
+    // shares the leaving bucket by type).
     const resolved = resolveTransitionBlock(child)!
-    expect(resolved.$key).toBe(child.uid)
+    expect(resolved.$key).toBeNull()
+    expect(resolved.$key).not.toBe(child.uid)
+  })
+
+  test('collects group leaves with component key prefixes', () => {
+    const Child = defineVaporComponent({
+      setup() {
+        return [
+          document.createComment('anchor'),
+          template(`<div>a</div>`)() as any,
+          template(`<div>b</div>`)() as any,
+        ]
+      },
+    })
+
+    let child: any
+    define({
+      setup() {
+        child = createComponent(Child)
+        setBlockKey(child, 'foo')
+        child.block[1].$key = undefined
+        child.block[2].$key = undefined
+        return child
+      },
+    }).render()
+
+    const resolved = resolveTransitionBlocks(child)
+    expect(resolved).toEqual([child.block[1], child.block[2]])
+    expect(child.block[1].$key).toBe('foo0')
+    expect(child.block[2].$key).toBe('foo1')
+  })
+
+  test('keeps inherited group keys stable across repeated resolutions', () => {
+    const Child = defineVaporComponent({
+      setup() {
+        return [
+          document.createComment('anchor'),
+          template(`<div>a</div>`)() as any,
+          template(`<div>b</div>`)() as any,
+        ]
+      },
+    })
+
+    let child: any
+    define({
+      setup() {
+        child = createComponent(Child)
+        setBlockKey(child, 'foo')
+        child.block[1].$key = undefined
+        child.block[2].$key = undefined
+        return child
+      },
+    }).render()
+
+    resolveTransitionBlocks(child)
+    resolveTransitionBlocks(child)
+
+    expect(child.block[1].$key).toBe('foo0')
+    expect(child.block[2].$key).toBe('foo1')
+  })
+
+  test('treats null group owner key as absent', () => {
+    const Child = defineVaporComponent({
+      setup() {
+        return [
+          template(`<div>a</div>`)() as any,
+          template(`<div>b</div>`)() as any,
+        ]
+      },
+    })
+
+    let child: any
+    define({
+      setup() {
+        child = createComponent(Child)
+        setBlockKey(child, null)
+        return child
+      },
+    }).render()
+
+    resolveTransitionBlocks(child)
+
+    expect(child.block[0].$key).toBeUndefined()
+    expect(child.block[1].$key).toBeUndefined()
+  })
+
+  test('composes nested group key prefixes', () => {
+    const data = ref({ items: [{ key: 'bar' }] })
+    const Child = compile(
+      `<template>
+        <span></span>
+        <div v-for="item in data.items" :key="item.key">child</div>
+      </template>`,
+      data,
+    )
+
+    let child: any
+    define({
+      setup() {
+        child = createComponent(Child)
+        setBlockKey(child, 'foo')
+        return child
+      },
+    }).render()
+
+    const resolved = resolveTransitionBlocks(child)
+
+    expect(resolved[0].$key).toBe('foo0')
+    expect(resolved[1].$key).toBe('foobar')
   })
 
   test('allows empty transition content', async () => {
@@ -172,6 +289,32 @@ describe('Transition', () => {
     expect(host.querySelector('div')?.style.display).toBe('')
     expect(onBeforeAppear).toHaveBeenCalledTimes(1)
     expect(onAppear).toHaveBeenCalledTimes(1)
+  })
+
+  test('direct child with initial shown v-show should call appear after insertion', async () => {
+    const calls: boolean[] = []
+    const data = ref({
+      show: true,
+      onBeforeAppear: (el: Element) => calls.push(el.isConnected),
+      onAppear: (el: Element) => calls.push(el.isConnected),
+    })
+    const App = compile(
+      `<template>
+        <Transition
+          appear
+          @before-appear="data.onBeforeAppear"
+          @appear="data.onAppear"
+        >
+          <div v-show="data.show">foo</div>
+        </Transition>
+      </template>`,
+      data,
+    )
+    define(App as any).render()
+
+    await nextTick()
+
+    expect(calls).toEqual([false, true])
   })
 
   test('direct slot child with initial hidden v-show should not trigger appear hooks', async () => {
@@ -367,6 +510,83 @@ describe('Transition', () => {
     expect(getTransitionOwner()?.$transition?.persisted).toBe(true)
   })
 
+  test('does not leak persisted from a v-show branch onto a non-v-show root', async () => {
+    let leaveCalls = 0
+    let leaveDone: (() => void) | undefined
+    const data = ref<any>({
+      b: 1,
+      show: true,
+      onLeave: (_el: Element, done: () => void) => {
+        leaveCalls++
+        leaveDone = done
+      },
+    })
+    const App = compile(
+      `<template>
+        <Transition appear name="t" @leave="data.onLeave">
+          <template #default v-if="data.b === 1">
+            <div v-show="data.show">foo</div>
+          </template>
+          <template #default v-else-if="data.b === 2">
+            <span>bar</span>
+          </template>
+        </Transition>
+      </template>`,
+      data,
+    )
+    const { host } = define(App as any).render()
+    await nextTick()
+
+    // visit the v-show branch (latches the runtime-derived persisted), then
+    // swap to a non-v-show root.
+    data.value.b = 2
+    await nextTick()
+    expect(host.querySelector('span')?.textContent).toBe('bar')
+    leaveCalls = 0
+
+    // structurally remove the non-v-show span. The leaked persisted=true would
+    // make performTransitionLeave skip the leave entirely (span vanishes,
+    // leaveCalls stays 0); with the fix the span leaves normally.
+    data.value.b = 3
+    await nextTick()
+    expect(leaveCalls).toBe(1)
+    const span = host.querySelector('span')!
+    expect(span.className).toContain('t-leave-active')
+
+    leaveDone && leaveDone()
+  })
+
+  test('does not early-remove across mixed number/string keys of equal value', async () => {
+    let leaveDone: (() => void) | undefined
+    const data = ref<any>({
+      k: 1,
+      onLeave: (_el: Element, done: () => void) => {
+        leaveDone = done
+      },
+    })
+    const App = compile(
+      `<template>
+        <Transition name="t" @leave="data.onLeave">
+          <div :key="data.k">{{ data.k }}</div>
+        </Transition>
+      </template>`,
+      data,
+    )
+    const { host } = define(App as any).render()
+    await nextTick()
+
+    // 1 (number) -> '1' (string): same String($key) bucket, different raw key.
+    // The leaving number-keyed node must NOT be early-removed by the entering
+    // string-keyed node, so both coexist during the leave (matching VDOM's
+    // isSameVNodeType raw-key guard). Without the guard the leaving node is
+    // force-removed and only 1 element remains.
+    data.value.k = '1'
+    await nextTick()
+    expect(host.querySelectorAll('div').length).toBe(2)
+
+    leaveDone && leaveDone()
+  })
+
   test('interop slot fallback should participate in out-in transition swaps', async () => {
     const data = ref({
       show: false,
@@ -559,5 +779,70 @@ describe('Transition', () => {
 
     expect(host.textContent).toContain('B')
     expect(onLeave).toHaveBeenCalledTimes(1)
+  })
+
+  test('unkeyed component child should early-remove the previous leaving instance on rapid toggle', async () => {
+    // Capture the leave `done` so the leave stays in progress while we toggle
+    // back on, exercising the earlyRemove path.
+    let leaveDone: (() => void) | undefined
+    const data = ref({
+      show: true,
+      onLeave: (_: Element, done: () => void) => {
+        leaveDone = done
+      },
+    })
+    const Comp = compile(`<template><div class="c">comp</div></template>`, data)
+    const App = compile(
+      `<template>
+        <Transition @leave="data.onLeave">
+          <components.Comp v-if="data.show" />
+        </Transition>
+      </template>`,
+      data,
+      { Comp },
+    )
+    const { host } = define(App as any).render()
+    expect(host.querySelectorAll('.c').length).toBe(1)
+
+    // start leaving; the captured `done` holds the leave open
+    data.value.show = false
+    await nextTick()
+    expect(host.querySelectorAll('.c').length).toBe(1)
+
+    // Re-enter while the previous instance is still leaving. The new instance
+    // has a different uid, but an unkeyed child must share the leaving-cache
+    // bucket by resolved type so earlyRemove force-removes the previous one
+    // instead of leaving both elements in the DOM.
+    data.value.show = true
+    await nextTick()
+    expect(host.querySelectorAll('.c').length).toBe(1)
+
+    // finishing the already early-removed leave must not strand a node
+    leaveDone && leaveDone()
+    await nextTick()
+    expect(host.querySelectorAll('.c').length).toBe(1)
+  })
+
+  test('static single-element child should react to transition prop changes', async () => {
+    const data = ref({ name: 'a', show: true })
+    const App = compile(
+      `<template>
+        <Transition :name="data.name">
+          <div v-show="data.show">foo</div>
+        </Transition>
+      </template>`,
+      data,
+    )
+    const { host } = define(App as any).render()
+    const el = host.querySelector('div')!
+
+    // change the transition name reactively before any toggle
+    data.value.name = 'b'
+    await nextTick()
+
+    // leaving should use the updated name, not the setup-time one
+    data.value.show = false
+    await nextTick()
+    expect(el.className).toBe('b-leave-from b-leave-active')
   })
 })

@@ -390,6 +390,13 @@ describe('patchProp', () => {
       setAttr(el, 'disabled', false)
       expect(el.getAttribute('disabled')).toBe('false')
     })
+
+    test('should set symbol attribute values', () => {
+      const el = document.createElement('div')
+      const symbol = Symbol('foo')
+      setAttr(el, 'data-foo', symbol)
+      expect(el.getAttribute('data-foo')).toBe(symbol.toString())
+    })
   })
 
   describe('setValue', () => {
@@ -532,6 +539,12 @@ describe('patchProp', () => {
       expect((res as any)['foo']).toBeUndefined()
     })
 
+    test('should be able to set ^attr to symbol values', () => {
+      const symbol = Symbol('foo')
+      const res = setDynamicProp('^foo', symbol)
+      expect(res.getAttribute('foo')).toBe(symbol.toString())
+    })
+
     test('should be able to set boolean prop', () => {
       let res = setDynamicProp(
         'disabled',
@@ -614,6 +627,25 @@ describe('patchProp', () => {
       expect(el.getAttribute('foo')).toBeNull()
     })
 
+    test('should treat nullish dynamic props as empty props', () => {
+      const el = document.createElement('div')
+
+      setDynamicProps(el, [null])
+      setDynamicProps(el, [undefined])
+
+      setDynamicProps(el, [{ foo: 'val' }])
+      expect(el.getAttribute('foo')).toBe('val')
+
+      setDynamicProps(el, [null])
+      expect(el.getAttribute('foo')).toBeNull()
+
+      setDynamicProps(el, [{ bar: 'val' }])
+      expect(el.getAttribute('bar')).toBe('val')
+
+      setDynamicProps(el, [undefined])
+      expect(el.getAttribute('bar')).toBeNull()
+    })
+
     test('should reset old modifier props', () => {
       const el = document.createElement('div')
 
@@ -692,6 +724,40 @@ describe('patchProp', () => {
       scope.stop()
       el.click()
       expect(handler).toHaveBeenCalledTimes(2)
+    })
+
+    test('should parse dynamic event option modifiers like vdom', () => {
+      const el = document.createElement('button')
+      const handler = vi.fn()
+      const scope = effectScope()
+      scope.run(() => {
+        renderEffect(() => {
+          setDynamicProps(el, [{ onClickOnceCapture: handler }])
+        })
+      })
+
+      el.dispatchEvent(new Event('click'))
+      el.dispatchEvent(new Event('click'))
+
+      expect(handler).toHaveBeenCalledTimes(1)
+      scope.stop()
+    })
+
+    test('should parse dynamic event names like vdom', () => {
+      const el = document.createElement('button')
+      const handler = vi.fn()
+      const scope = effectScope()
+      scope.run(() => {
+        renderEffect(() => {
+          setDynamicProps(el, [{ onMyEventOnce: handler }])
+        })
+      })
+
+      el.dispatchEvent(new Event('my-event'))
+      el.dispatchEvent(new Event('my-event'))
+
+      expect(handler).toHaveBeenCalledTimes(1)
+      scope.stop()
     })
 
     test('should restore fallthrough state when dynamic props throw', () => {

@@ -1,10 +1,6 @@
+import { shallowReactive } from '@vue/reactivity'
 import { extend, isPlainObject } from '@vue/shared'
-import {
-  createComponent,
-  createVaporApp,
-  createVaporSSRApp,
-  defineVaporComponent,
-} from '.'
+import { createVaporApp, createVaporSSRApp, defineVaporComponent } from '.'
 import {
   type ComponentObjectPropsOptions,
   type CreateAppFunction,
@@ -16,10 +12,11 @@ import {
   VueElementBase,
   warn,
 } from '@vue/runtime-dom'
-import type {
-  VaporComponent,
-  VaporComponentInstance,
-  VaporComponentOptions,
+import {
+  type VaporComponent,
+  type VaporComponentInstance,
+  type VaporComponentOptions,
+  createComponent,
 } from './component'
 import type { Block } from './block'
 import { withHydration } from './dom/hydration'
@@ -29,7 +26,7 @@ import type {
   VaporRenderResult,
 } from './apiDefineComponent'
 import type { StaticSlots } from './componentSlots'
-import { SlotFragment, isFragment } from './fragment'
+import { isFragment, isSlotFragment } from './fragment'
 
 export type VaporElementConstructor<P = {}> = {
   new (initialProps?: Record<string, any>): VaporElement & P
@@ -204,7 +201,7 @@ export class VaporElement extends VueElementBase<
     props: Record<string, any> | undefined = {},
     createAppFn: CreateAppFunction<ParentNode, VaporComponent> = createVaporApp,
   ) {
-    super(def, props, createAppFn)
+    super(def, shallowReactive(props), createAppFn)
   }
 
   protected _needsHydration(): boolean {
@@ -250,31 +247,16 @@ export class VaporElement extends VueElementBase<
   }
 
   protected _update(): void {
-    if (!this._app) return
-    // update component by re-running all its render effects
-    const renderEffects = (this._instance! as VaporComponentInstance)
-      .renderEffects
-    if (renderEffects) renderEffects.forEach(e => e.run())
+    // Unlike VDOM custom elements, Vapor does not synchronously patch the root
+    // component in _update(). CE props are reactive, so property writes update
+    // in the next scheduler flush. Attribute writes are delivered by
+    // MutationObserver first; compared with VDOM CE, which patches inside
+    // _update(), they become visible one tick later.
   }
 
   protected _unmount(): void {
-    if (__TEST__) {
-      try {
-        this._app!.unmount()
-      } catch (error) {
-        // In test environment, ignore errors caused by accessing Node
-        // after the test environment has been torn down
-        if (
-          error instanceof ReferenceError &&
-          error.message.includes('Node is not defined')
-        ) {
-          // Ignore this error in tests
-        } else {
-          throw error
-        }
-      }
-    } else {
-      this._app!.unmount()
+    if (this._app) {
+      this._app.unmount()
     }
     if (this._instance && this._instance.ce) {
       this._instance.ce = undefined
@@ -318,7 +300,7 @@ export class VaporElement extends VueElementBase<
       // current owner rather than a stale DOM snapshot.
       if (
         replacement.usedFallback &&
-        block instanceof SlotFragment &&
+        isSlotFragment(block) &&
         block.customElementFallback
       ) {
         this._updateFragmentNodes(block.customElementFallback, replacements)
@@ -334,7 +316,7 @@ export class VaporElement extends VueElementBase<
   }
 
   private _createComponent() {
-    this._def.ce = instance => {
+    const ce = (instance: VaporComponentInstance) => {
       this._app!._ceComponent = this._instance = instance
       // For shadowRoot: false, _renderSlots is called synchronously after mount
       // in _mount() to ensure correct lifecycle order
@@ -352,6 +334,8 @@ export class VaporElement extends VueElementBase<
       undefined,
       undefined,
       this._app!._context,
+      false,
+      ce,
     )
   }
 }

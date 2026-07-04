@@ -37,10 +37,9 @@ import {
   DynamicFragment,
   SlotFragment,
   type VaporFragment,
-  getCurrentSlotBoundary,
   isInteropFragment,
-  withOwnedSlotBoundary,
 } from './fragment'
+import { currentSlotBoundary, withSlotBoundary } from './slotBoundary'
 import { createElement } from './dom/node'
 import { setDynamicProps } from './dom/prop'
 import {
@@ -48,6 +47,7 @@ import {
   isInteropEnabled,
 } from './vdomInteropState'
 import { setScopeId, trackScopeIdFragment } from './scopeId'
+import { withHydratingSlotBoundary } from './dom/hydrateFragment'
 
 /**
  * Flag to indicate if we are executing a once slot.
@@ -90,7 +90,9 @@ export type LooseRawSlots =
 
 export type StaticSlots = Record<string, VaporSlot>
 
-export type VaporSlot = BlockFn
+export type VaporSlot = BlockFn & {
+  _?: VaporSlotFlags.NON_STABLE
+}
 export type DynamicSlot = { name: string; fn: VaporSlot }
 export type DynamicSlotFn = () => DynamicSlot | DynamicSlot[]
 export type DynamicSlotSource = StaticSlots | DynamicSlotFn
@@ -106,6 +108,12 @@ const rawSlotWrappersCache = new WeakMap<
     }
   >
 >()
+
+export function getRawSlotsOwner(
+  slots: RawSlots,
+): VaporComponentInstance | null {
+  return rawSlotsOwnerMap.get(slots) || null
+}
 
 export function normalizeRawSlots(
   rawSlots?: LooseRawSlots | null,
@@ -150,6 +158,7 @@ function getOwnedSlot(
   }
   const wrapped = ((...args: any[]) =>
     withSlotOwner(slots, () => slot(...args))) as VaporSlot
+  wrapped._ = slot._
   wrappers.set(key, { slot, wrapped })
   return wrapped
 }
@@ -306,25 +315,21 @@ export function createSlot(
       (instance as GenericComponentInstance).ce ||
       (instance.parent && isAsyncWrapper(instance.parent) && instance.parent.ce)
     )
-    const needsSlotFragment =
-      isHydrating ||
-      !!fallback ||
-      !!getCurrentSlotBoundary() ||
-      isCustomElementSlot
+    const needsSlotFragment = shouldUseSlotFragment(
+      rawSlots,
+      name,
+      fallback,
+      isCustomElementSlot,
+    )
     const slotFragment = needsSlotFragment
       ? new SlotFragment(slotRoot)
       : undefined
     let dynamicFragment: DynamicFragment | undefined
     if (slotFragment) {
       fragment = slotFragment
-      if (isHydrating) {
-        // Hydration uses forwarded slots to decide close marker ownership.
-        slotFragment.forwarded =
-          currentSlotOwner != null && currentSlotOwner !== currentInstance
-      }
     } else {
-      // Fast path: plain slots without fallback/boundary semantics only need a
-      // DynamicFragment. SlotFragment is reserved for fallback owners.
+      // Fast path: DynamicFragment is enough, but hydration still enters the
+      // slot boundary so it can own the SSR close marker.
       dynamicFragment = new DynamicFragment(
         __DEV__ ? 'slot' : undefined,
         false,
@@ -333,6 +338,12 @@ export function createSlot(
       dynamicFragment.isSlot = true
       fragment = dynamicFragment
     }
+
+    if (isHydrating) {
+      ;(fragment as DynamicFragment).forwarded =
+        currentSlotOwner != null && currentSlotOwner !== currentInstance
+    }
+
     const isDynamicName = isFunction(name)
 
     const renderSlot = () => {
@@ -354,7 +365,7 @@ export function createSlot(
         if (once) setSlotProps()
         else renderEffect(setSlotProps)
         if (fallback) {
-          withOwnedSlotBoundary(slotFragment!.parentSlotBoundary, () => {
+          withSlotBoundary(slotFragment!.slotBoundary, () => {
             const fallbackBlock = fallback()
             // Keep the live fallback block on the SlotFragment itself. The
             // native slot outlet is temporary and gets removed by CE slot
@@ -368,16 +379,20 @@ export function createSlot(
       }
 
       const slot = getSlot(rawSlots, slotName)
-      if (slot) {
-        if (slotFragment) {
-          slotFragment.updateSlot(getBoundSlot(slot), fallback)
-        } else {
-          dynamicFragment!.update(getBoundSlot(slot))
-        }
-      } else if (slotFragment) {
-        slotFragment.updateSlot(undefined, fallback)
+      const render = slot ? getBoundSlot(slot) : undefined
+      if (slotFragment) {
+        slotFragment.updateSlot(render, fallback)
       } else {
-        dynamicFragment!.update()
+        // When no slot render exists, the fast path hands fallback to the
+        // DynamicFragment; during hydration it owns the slot SSR range, so
+        // empty dynamic roots get its close marker.
+        if (isHydrating) {
+          withHydratingSlotBoundary(() =>
+            dynamicFragment!.update(render || fallback),
+          )
+        } else {
+          dynamicFragment!.update(render || fallback)
+        }
       }
     }
 
@@ -425,4 +440,33 @@ export function createSlot(
   }
 
   return fragment
+}
+
+function shouldUseSlotFragment(
+  rawSlots: RawSlots,
+  name: string | (() => string),
+  fallback: VaporSlot | undefined,
+  isCustomElementSlot: boolean,
+): boolean {
+  // Native CE slots render a real <slot>, so SlotFragment owns fallback.
+  if (isCustomElementSlot) return true
+
+  // Nested fallback resolution must preserve the boundary chain.
+  if (currentSlotBoundary) return true
+
+  // Without fallback, there is no fallback branch to track.
+  if (!fallback) return false
+
+  // No slots means fallback is the only possible branch.
+  if (rawSlots === EMPTY_OBJ) return false
+
+  // Dynamic names and dynamic slot sources still need runtime resolution.
+  if (isFunction(name) || rawSlots.$) return true
+
+  const slot = getSlot(rawSlots, name)
+  // No matching static slot means fallback is the only possible branch.
+  if (!slot) return false
+
+  // Non-stable slot content can become invalid, making fallback reachable.
+  return slot._ === VaporSlotFlags.NON_STABLE
 }

@@ -41,7 +41,7 @@ import {
   warn,
   warnExtraneousAttributes,
 } from '@vue/runtime-dom'
-import { type Block, findBlockNode, insert, isBlock, remove } from './block'
+import { type Block, findBlockBoundary, insert, isBlock, remove } from './block'
 import {
   type ShallowRef,
   markRaw,
@@ -106,18 +106,13 @@ import {
   withDeferredHydrationBoundary,
 } from './dom/hydration'
 import { createComment, createElement, createTextNode } from './dom/node'
-import type { TeleportFragment } from './components/Teleport'
 import {
   isTeleportEnabled,
   isTeleportFragment,
   isVaporTeleport,
 } from './teleport'
 import type { KeepAliveInstance } from './components/KeepAlive'
-import {
-  currentKeepAliveCtx,
-  isKeepAliveEnabled,
-  setCurrentKeepAliveCtx,
-} from './keepAlive'
+import { getKeepAliveContext, isKeepAliveEnabled } from './keepAlive'
 import {
   insertionAnchor,
   insertionParent,
@@ -127,7 +122,8 @@ import type {
   DefineVaporComponent,
   VaporRenderResult,
 } from './apiDefineComponent'
-import { DynamicFragment, isFragment } from './fragment'
+import { DynamicFragment, isDynamicFragment, isFragment } from './fragment'
+import { resolvePendingSlotContent } from './dom/hydrateFragment'
 import type { VaporElement } from './apiDefineCustomElement'
 import {
   isSuspenseEnabled,
@@ -216,10 +212,6 @@ export interface VaporComponentOptions<
   name?: string
   vapor?: boolean
   components?: Record<string, VaporComponent>
-  /**
-   * @internal custom element interception hook
-   */
-  ce?: (instance: VaporComponentInstance) => void
 }
 
 interface SharedInternalOptions {
@@ -258,6 +250,7 @@ export function createComponent(
     currentInstance.appContext) ||
     emptyContext,
   managedMount = false,
+  ce?: (instance: VaporComponentInstance) => void,
 ): VaporComponentInstance {
   // A component created while rendering a v-once slot should receive frozen
   // parent inputs, but its own render effects should still be live.
@@ -286,6 +279,7 @@ export function createComponent(
     }
   }
   if (isHydrating) {
+    resolvePendingSlotContent()
     hydrationCursor = enterHydrationCursor()
     if (component.__multiRoot && isComment(currentHydrationNode!, '[')) {
       hydrationClose = locateEndAnchor(currentHydrationNode!)
@@ -392,20 +386,14 @@ export function createComponent(
       rawSlots,
       appContext,
       once,
+      ce,
     )
 
-    // handle currentKeepAliveCtx for component boundary isolation
-    // AsyncWrapper should NOT clear currentKeepAliveCtx so its internal
-    // DynamicFragment can capture it
-    if (
-      isKeepAliveEnabled &&
-      currentKeepAliveCtx &&
-      !isAsyncWrapper(instance)
-    ) {
-      currentKeepAliveCtx.processShapeFlag(instance)
-      // clear currentKeepAliveCtx so child components don't associate
-      // with parent's KeepAlive
-      setCurrentKeepAliveCtx(null)
+    // Async wrappers are skipped here: their DynamicFragment resolves the outer
+    // KeepAlive context from the wrapper's parent chain during setup.
+    if (isKeepAliveEnabled && !isAsyncWrapper(instance)) {
+      const keepAliveCtx = getKeepAliveContext(currentInstance)
+      if (keepAliveCtx) keepAliveCtx.processShapeFlag(instance)
     }
 
     // reset currentSlotOwner to null to avoid affecting the child components
@@ -486,7 +474,8 @@ export function createComponent(
         if (
           instance.block &&
           hydrationClose &&
-          findBlockNode(instance.block).nextNode === hydrationClose.nextSibling
+          findBlockBoundary(instance.block).nextNode ===
+            hydrationClose.nextSibling
         ) {
           setCurrentHydrationNode(hydrationClose)
         }
@@ -708,9 +697,6 @@ export class VaporComponentInstance<
   restoreAsyncContext?: () => void | (() => void)
   deferredHydrationBoundary?: () => void
 
-  // for vapor custom element
-  renderEffects?: RenderEffect[]
-
   hasFallthrough: boolean
 
   // for keep-alive
@@ -743,15 +729,19 @@ export class VaporComponentInstance<
   ec?: LifecycleHook // LifecycleHooks.ERROR_CAPTURED
   sp?: LifecycleHook<() => Promise<unknown>> // LifecycleHooks.SERVER_PREFETCH
 
+  // renderEffect creation counter for scheduler ordering.
+  effectCount = 0
+
   // dev only
   setupState?: Exposed extends Block ? undefined : ShallowUnwrapRef<Exposed>
   devtoolsRawSetupState?: any
   hmrRerender?: () => void
   hmrReload?: (newComp: VaporComponent) => void
-  parentTeleport?: TeleportFragment | null
   propsOptions?: NormalizedPropsOptions
   emitsOptions?: ObjectEmitsOptions | null
   isSingleRoot?: boolean
+  // for HMR rerender
+  renderEffects?: RenderEffect[]
 
   /**
    * dev only flag to track whether $attrs was used during render.
@@ -773,6 +763,7 @@ export class VaporComponentInstance<
     rawSlots?: LooseRawSlots | null,
     appContext?: GenericAppContext,
     once?: boolean,
+    ce?: (instance: VaporComponentInstance) => void,
   ) {
     this.vapor = true
     this.uid = nextUid()
@@ -850,8 +841,8 @@ export class VaporComponentInstance<
     this.scopeId = getCurrentScopeId()
 
     // apply custom element special handling
-    if (comp.ce) {
-      comp.ce(this)
+    if (ce) {
+      ce(this)
     }
 
     if (__DEV__) {
@@ -981,6 +972,7 @@ export function createPlainElement(
   const _insertionAnchor = insertionAnchor
   let hydrationCursor: HydrationCursor | null = null
   if (isHydrating) {
+    resolvePendingSlotContent()
     hydrationCursor = enterHydrationCursor()
   } else {
     resetInsertionState()
@@ -1018,15 +1010,26 @@ export function createPlainElement(
     let nextNode: Node | null = null
     if (isHydrating) {
       nextNode = nextLogicalSibling(el)
-      setCurrentHydrationNode(el.firstChild)
+      let child = el.firstChild
+      if (rawSlots.$ && !child) {
+        // SSR may omit default-slot nodes for dynamic native children.
+        // Seed a local anchor so the inner fragment can locate and reuse it.
+        child = el.appendChild(
+          markHydrationAnchor(__DEV__ ? createComment('') : createTextNode()),
+        )
+      }
+      setCurrentHydrationNode(child)
     }
     if (rawSlots.$) {
-      // Dynamic element children don't own an SSR slot-range anchor.
-      // Use an empty label so hydration treats this as a generic dynamic
-      // fragment instead of trying to reuse SlotFragment-style anchors.
+      // Dynamic element children don't own an SSR slot-range anchor, so flag
+      // this as a native-children fragment. Hydration keys off `nativeChildren`
+      // (not the label) to inject/reuse its own anchor instead of trying to
+      // reuse SlotFragment-style anchors. The hydrating label stays empty so
+      // the runtime anchor renders as `<!---->`.
       const frag = new DynamicFragment(
         isHydrating ? '' : __DEV__ ? 'slot' : undefined,
       )
+      frag.nativeChildren = true
       renderEffect(() => frag.update(getSlot(rawSlots as RawSlots, 'default')))
       if (!isHydrating) insert(frag, el)
     } else {
@@ -1157,7 +1160,13 @@ export function unmountComponent(
     return
   }
 
-  if (instance.isMounted && !instance.isUnmounted) {
+  if (
+    !instance.isUnmounted &&
+    (instance.isMounted ||
+      // A hydrating async setup component can be unmounted before its block exists.
+      // It still needs normal scope cleanup so a later resolve is ignored.
+      (instance.asyncDep && !instance.asyncResolved))
+  ) {
     if (__DEV__) {
       unregisterHMR(instance)
     }
@@ -1176,7 +1185,12 @@ export function unmountComponent(
   }
 
   if (parentNode) {
-    remove(instance.block, parentNode)
+    if (instance.block) {
+      remove(instance.block, parentNode)
+    } else {
+      // TODO: a hydrated async setup component may own SSR DOM before its
+      // block exists. That adopted DOM should be removed on this path.
+    }
   }
 }
 
@@ -1207,7 +1221,7 @@ export function getRootElement(
   }
 
   if (isFragment(block) && !(isTeleportEnabled && isTeleportFragment(block))) {
-    if (block instanceof DynamicFragment && onDynamicFragment) {
+    if (isDynamicFragment(block) && onDynamicFragment) {
       onDynamicFragment(block)
     }
     const { nodes } = block
@@ -1372,7 +1386,7 @@ interface DynamicRootChain {
 // non-single-root still keep the outer fragment hook for future branch updates,
 // but report hasNonSingleRoot so the current render can warn.
 function getSingleDynamicRootChain(block: Block): DynamicRootChain | undefined {
-  if (block instanceof DynamicFragment) {
+  if (isDynamicFragment(block)) {
     const { nodes } = block
     const nested = getSingleDynamicRootChain(nodes)
     return {

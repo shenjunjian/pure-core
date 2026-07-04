@@ -1,4 +1,4 @@
-import { isArray } from '@vue/shared'
+import { EMPTY_ARR, isArray } from '@vue/shared'
 import {
   type VaporComponentInstance,
   isVaporComponent,
@@ -28,7 +28,8 @@ export interface VaporTransitionHooks extends TransitionHooks {
   state: TransitionState
   props: TransitionProps
   instance: VaporComponentInstance
-  // mark transition hooks as disabled
+  // Temporarily skips enter/move during TransitionGroup FLIP measurement.
+  // Leave transitions intentionally ignore this flag.
   disabled?: boolean
   // TransitionGroup sets this to handle applying hooks to list children
   applyGroup?: (
@@ -60,6 +61,8 @@ export type Block =
   | Block[]
 export type BlockFn = (...args: any[]) => Block
 
+export const EMPTY_BLOCK: Block[] = EMPTY_ARR as unknown as Block[]
+
 export function isBlock(val: NonNullable<unknown>): val is Block {
   return (
     val instanceof Node ||
@@ -69,24 +72,33 @@ export function isBlock(val: NonNullable<unknown>): val is Block {
   )
 }
 
-export function isValidBlock(block: Block | null | undefined): boolean {
+export function isValidBlock(
+  block: Block | null | undefined,
+  componentAsValid: boolean = false,
+): boolean {
   if (!block) {
     return false
   } else if (block instanceof Node) {
     return !(block instanceof Comment)
   } else if (isVaporComponent(block)) {
-    return isValidBlock(block.block)
+    return componentAsValid || isValidBlock(block.block, componentAsValid)
   } else if (isArray(block)) {
-    return block.length > 0 && block.some(isValidBlock)
+    return (
+      block.length > 0 &&
+      block.some(block => isValidBlock(block, componentAsValid))
+    )
   } else {
     if (isInteropEnabled && block.isBlockValid) {
-      return block.isBlockValid()
+      return block.isBlockValid(componentAsValid)
     }
-    if (block.validityPending) {
-      return true
-    }
-    return isValidBlock(block.nodes)
+    return isValidBlock(block.nodes, componentAsValid)
   }
+}
+
+// Slot validity follows VDOM fallback semantics: a component root counts as
+// provided content even when its rendered block is empty.
+export function isValidSlot(block: Block | null | undefined): boolean {
+  return isValidBlock(block, true)
 }
 
 export function insert(
@@ -334,7 +346,7 @@ export function normalizeBlock(block: Block): Node[] {
   return nodes
 }
 
-export function findBlockNode(block: Block): {
+export function findBlockBoundary(block: Block): {
   parentNode: Node | null
   nextNode: Node | null
 } {
@@ -343,12 +355,13 @@ export function findBlockNode(block: Block): {
 
   // if nodes render as a fragment and the current nextNode is fragment
   // end anchor, need to move to the next node. Skip this when the block
-  // already includes its own end anchor (for example VDOM Fragment ranges).
+  // already includes its own end or runtime empty text anchor.
   if (
     nextNode &&
     isComment(nextNode, ']') &&
     isFragmentBlock(block) &&
-    !isComment(lastChild, ']')
+    !isComment(lastChild, ']') &&
+    !(lastChild.nodeType === 3 && !(lastChild as Text).data)
   ) {
     nextNode = nextNode.nextSibling
   }

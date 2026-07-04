@@ -6,15 +6,11 @@ import {
   ErrorCodes,
   NodeTypes,
   type PlainElementNode,
-  type RootNode,
   type SimpleExpressionNode,
-  type TemplateChildNode,
   advancePositionWithClone,
   createCompilerError,
   createSimpleExpression,
-  hasSingleChild,
   isSimpleIdentifier,
-  isSingleIfBlock,
   isStaticArgOf,
   isValidHTMLNesting,
   resolveModifiers,
@@ -69,6 +65,7 @@ import {
   getParserOptions,
 } from '../generators/utils'
 import { normalizeBindShorthand } from './vBind'
+import { ignoreVHtmlChildren } from './vHtml'
 import type { Expression, ObjectExpression, ObjectProperty } from '@babel/types'
 import { parseExpression } from '@babel/parser'
 
@@ -80,6 +77,10 @@ export const isReservedProp: (key: string) => boolean = /*#__PURE__*/ makeMap(
 export const transformElement: NodeTransform = (node, context) => {
   let effectIndex = context.block.effect.length
   const getEffectIndex = () => effectIndex++
+
+  if (node.type === NodeTypes.ELEMENT && node.children.length) {
+    ignoreVHtmlChildren(node, context as TransformContext<ElementNode>, 'node')
+  }
 
   // If the element is a component, we need to isolate its slots context.
   // This ensures that slots defined for this component are not accidentally
@@ -131,7 +132,7 @@ export const transformElement: NodeTransform = (node, context) => {
       getEffectIndex,
     )
 
-    const singleRoot = isSingleRoot(context)
+    const singleRoot = context.isSingleRoot
 
     if (isComponent) {
       transformComponentElement(
@@ -272,35 +273,6 @@ export function isInSameTemplateAsParent(
   )
 }
 
-function isSingleRoot(
-  context: TransformContext<RootNode | TemplateChildNode>,
-): boolean {
-  if (context.inVFor) {
-    return false
-  }
-
-  let { parent } = context
-  if (
-    parent &&
-    !(hasSingleChild(parent.node) || isSingleIfBlock(parent.node))
-  ) {
-    return false
-  }
-  while (
-    parent &&
-    parent.parent &&
-    parent.node.type === NodeTypes.ELEMENT &&
-    parent.node.tagType === ElementTypes.TEMPLATE
-  ) {
-    parent = parent.parent
-    if (!(hasSingleChild(parent.node) || isSingleIfBlock(parent.node))) {
-      return false
-    }
-  }
-
-  return context.root === parent
-}
-
 function transformComponentElement(
   node: ComponentNode,
   propsResult: PropsResult,
@@ -432,7 +404,6 @@ function transformNativeElement(
   template += `<${tag}`
   if (scopeId) template += ` ${scopeId}`
 
-  const dynamicProps: string[] = []
   if (propsResult[0] /* dynamic props */) {
     const [, dynamicArgs, expressions] = propsResult
     context.registerEffect(
@@ -471,8 +442,12 @@ function transformNativeElement(
 
     for (const prop of propsResult[1]) {
       const { key, values } = prop
+      const canStringifyAttrName =
+        key.isStatic && !UNSAFE_ATTR_NAME_RE.test(key.content)
+      let foldedValue: string | boolean | undefined
       // handling asset imports
       if (
+        canStringifyAttrName &&
         context.imports.some(imported =>
           values[0].content.includes(imported.exp.content),
         )
@@ -482,69 +457,38 @@ function transformNativeElement(
         // with string concatenation in the generator, see genTemplates
         template += `${key.content}="${IMPORT_EXP_START}${values[0].content}${IMPORT_EXP_END}"`
         prevWasQuoted = true
-      } else if (key.isStatic && !prop.modifier && isBooleanAttr(key.content)) {
-        if (
-          values.length === 1 &&
-          (values[0].isStatic || values[0].content === "''") &&
-          !dynamicKeys.includes(key.content)
-        ) {
-          const value = values[0].content === "''" ? '' : values[0].content
-          appendTemplateProp(key.content, value)
-        } else {
-          const include = foldBooleanAttrValue(values)
-          if (include != null) {
-            if (include) {
-              appendTemplateProp(key.content)
-            }
-          } else {
-            dynamicProps.push(key.content)
-            context.registerEffect(
-              values,
-              {
-                type: IRNodeTypes.SET_PROP,
-                element: context.reference(),
-                prop,
-                tag,
-              },
-              getEffectIndex,
-            )
-          }
-        }
-      } else if (key.isStatic && !prop.modifier && hasBoundValue(values)) {
-        let foldedValue: string | undefined
-        if (key.content === 'class') {
-          foldedValue = foldClassValues(values)
-        } else if (key.content === 'style') {
-          foldedValue = foldStyleValues(values)
-        }
-
-        if (foldedValue != null) {
-          if (foldedValue) {
-            appendTemplateProp(key.content, foldedValue, true)
-          }
-        } else {
-          dynamicProps.push(key.content)
-          context.registerEffect(
-            values,
-            {
-              type: IRNodeTypes.SET_PROP,
-              element: context.reference(),
-              prop,
-              tag,
-            },
-            getEffectIndex,
-          )
-        }
       } else if (
-        key.isStatic &&
+        canStringifyAttrName &&
         values.length === 1 &&
         (values[0].isStatic || values[0].content === "''") &&
         !dynamicKeys.includes(key.content)
       ) {
         const value = values[0].content === "''" ? '' : values[0].content
         appendTemplateProp(key.content, value)
+      } else if (
+        canStringifyAttrName &&
+        !prop.modifier &&
+        isBooleanAttr(key.content) &&
+        (foldedValue = foldBooleanAttrValue(values)) != null
+      ) {
+        if (foldedValue) {
+          appendTemplateProp(key.content)
+        }
+      } else if (
+        canStringifyAttrName &&
+        !prop.modifier &&
+        hasBoundValue(values) &&
+        (foldedValue =
+          key.content === 'class'
+            ? foldClassValues(values)
+            : key.content === 'style'
+              ? foldStyleValues(values)
+              : undefined) != null
+      ) {
+        if (foldedValue) {
+          appendTemplateProp(key.content, foldedValue, true)
+        }
       } else {
-        dynamicProps.push(key.content)
         context.registerEffect(
           values,
           {

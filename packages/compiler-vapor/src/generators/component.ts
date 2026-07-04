@@ -1,5 +1,6 @@
 import {
   VaporDynamicComponentFlags,
+  VaporSlotFlags,
   camelize,
   extend,
   getModifierPropName,
@@ -8,8 +9,11 @@ import {
 } from '@vue/shared'
 import type { CodegenContext } from '../generate'
 import {
+  type BlockIRNode,
   type CreateComponentIRNode,
+  type IRDynamicInfo,
   IRDynamicPropsKind,
+  IRNodeTypes,
   type IRProp,
   type IRProps,
   type IRPropsStatic,
@@ -39,11 +43,12 @@ import {
   type SimpleExpressionNode,
   createSimpleExpression,
   isMemberExpression,
+  isSimpleIdentifier,
   toValidAssetId,
 } from '@vue/compiler-dom'
+import { genDirectivesForElement } from './directive'
 import { genEventHandler } from './event'
-import { genDirectiveModifiers, genDirectivesForElement } from './directive'
-import { genBlock, markSlotRootOperations } from './block'
+import { findReturnedDynamic, genBlock, markSlotRootOperations } from './block'
 import {
   type DestructureMap,
   type DestructureMapValue,
@@ -51,8 +56,14 @@ import {
   parseValueDestructure,
 } from './for'
 import { genModelHandler } from './vModel'
+import { genDirectiveModifiers } from './modifier'
 import { isBuiltInComponent } from '../utils'
 import type { Expression } from '@babel/types'
+
+function genStaticModifierPropKey(name: string): CodeFragment[] {
+  const key = getModifierPropName(name)
+  return [isSimpleIdentifier(key) ? key : JSON.stringify(key)]
+}
 
 export function genCreateComponent(
   operation: CreateComponentIRNode,
@@ -75,10 +86,8 @@ export function genCreateComponent(
     operation.dynamic && !operation.dynamic.isStatic
   )
   const dynamicComponentFlags = isRuntimeDynamicComponent
-    ? (root ? VaporDynamicComponentFlags.SINGLE_ROOT : 0) |
-      (once ? VaporDynamicComponentFlags.ONCE : 0) |
-      (slotRoot ? VaporDynamicComponentFlags.SLOT_ROOT : 0)
-    : 0
+    ? genDynamicComponentFlags(root, once, slotRoot)
+    : false
   const rawSlots = genRawSlots(slots, context)
   const [ids, handlers] = processInlineHandlers(props, context)
   const rawProps = context.withId(() => genRawProps(props, context, true), ids)
@@ -107,13 +116,7 @@ export function genCreateComponent(
       tag,
       rawProps,
       rawSlots,
-      isRuntimeDynamicComponent
-        ? dynamicComponentFlags
-          ? String(dynamicComponentFlags)
-          : false
-        : root
-          ? 'true'
-          : false,
+      isRuntimeDynamicComponent ? dynamicComponentFlags : root ? 'true' : false,
       isRuntimeDynamicComponent ? false : once && 'true',
       isRuntimeDynamicComponent ? false : maybeSelfReference && 'true',
     ),
@@ -153,6 +156,34 @@ export function genCreateComponent(
       )
     }
   }
+}
+
+function genDynamicComponentFlags(
+  root: boolean | undefined,
+  once: boolean | undefined,
+  slotRoot: boolean | undefined,
+): string | false {
+  let flags = 0
+  const names: string[] = []
+
+  if (root) {
+    flags |= VaporDynamicComponentFlags.SINGLE_ROOT
+    names.push('SINGLE_ROOT')
+  }
+  if (once) {
+    flags |= VaporDynamicComponentFlags.ONCE
+    names.push('ONCE')
+  }
+  if (slotRoot) {
+    flags |= VaporDynamicComponentFlags.SLOT_ROOT
+    names.push('SLOT_ROOT')
+  }
+
+  if (!flags) {
+    return false
+  }
+
+  return __DEV__ ? `${flags} /* ${names.join(', ')} */` : String(flags)
 }
 
 function getUniqueHandlerName(context: CodegenContext, name: string): string {
@@ -352,7 +383,7 @@ function genStaticProps(
       const { key, modelModifiers } = prop
       if (modelModifiers && modelModifiers.length) {
         const modifiersKey = key.isStatic
-          ? [getModifierPropName(key.content)]
+          ? genStaticModifierPropKey(key.content)
           : ['[', ...genExpression(key, context), ' + "Modifiers"]']
         const modifiersVal = genDirectiveModifiers(modelModifiers)
         args.push([
@@ -424,7 +455,7 @@ function genDynamicProps(
           const { modelModifiers } = p
           if (modelModifiers && modelModifiers.length) {
             const modifiersKey = p.key.isStatic
-              ? ([getModifierPropName(p.key.content)] as CodeFragment[])
+              ? genStaticModifierPropKey(p.key.content)
               : ([
                   '[',
                   ...genExpression(p.key, context),
@@ -655,7 +686,7 @@ function genBasicDynamicSlot(
   return genMulti(
     DELIMITERS_OBJECT_NEWLINE,
     ['name: ', ...genExpression(name, context)],
-    ['fn: ', ...genSlotBlockWithProps(fn, context)],
+    ['fn: ', ...genSlotBlockWithProps(fn, context, false)],
   )
 }
 
@@ -678,7 +709,7 @@ function genLoopSlot(
     ['name: ', ...context.withId(() => genExpression(name, context), idMap)],
     [
       'fn: ',
-      ...context.withId(() => genSlotBlockWithProps(fn, context), idMap),
+      ...context.withId(() => genSlotBlockWithProps(fn, context, false), idMap),
     ],
   )
   return [
@@ -718,7 +749,11 @@ function genConditionalSlot(
   ]
 }
 
-function genSlotBlockWithProps(oper: SlotBlockIRNode, context: CodegenContext) {
+function genSlotBlockWithProps(
+  oper: SlotBlockIRNode,
+  context: CodegenContext,
+  emitNonStableFlag = true,
+) {
   let propsName: string | undefined
   let exitScope: (() => void) | undefined
   let depth: number | undefined
@@ -749,13 +784,97 @@ function genSlotBlockWithProps(oper: SlotBlockIRNode, context: CodegenContext) {
   }
 
   const exitSlotBlock = context.enterSlotBlock()
-  markSlotRootOperations(oper)
+  const hasStableRoot = hasStableSlotRoot(oper, context)
+  if (!hasStableRoot) {
+    markSlotRootOperations(oper)
+  }
   let blockFn = context.withId(
     () => genBlock(oper, context, propsName ? [propsName] : []),
     idMap,
   )
+  // Dynamic slot sources keep rawSlots.$, so runtime stays conservative.
+  if (emitNonStableFlag && !hasStableRoot) {
+    blockFn = genCall(context.helper('extend'), blockFn, [
+      `{ _: ${genSlotFlags(VaporSlotFlags.NON_STABLE)} }`,
+    ])
+  }
   exitSlotBlock()
   exitScope && exitScope()
 
   return blockFn
+}
+
+function genSlotFlags(flags: number): string {
+  const names: string[] = []
+
+  if (flags & VaporSlotFlags.NO_SLOTTED) {
+    names.push('NO_SLOTTED')
+  }
+  if (flags & VaporSlotFlags.ONCE) {
+    names.push('ONCE')
+  }
+  if (flags & VaporSlotFlags.SLOT_ROOT) {
+    names.push('SLOT_ROOT')
+  }
+  if (flags & VaporSlotFlags.NON_STABLE) {
+    names.push('NON_STABLE')
+  }
+
+  return __DEV__ ? `${flags} /* ${names.join(', ')} */` : String(flags)
+}
+
+const commentOnlyTemplateRE = /^(?:<!--[\s\S]*?-->)+$/
+
+// A slot can skip fallback/boundary tracking when at least one root is stable.
+// Components count as valid even if their own render result is a comment.
+function hasStableSlotRoot(
+  block: BlockIRNode,
+  context: CodegenContext,
+): boolean {
+  let hasValidRoot = false
+  for (let i = 0; i < block.returns.length; i++) {
+    const id = block.returns[i]
+    const child = findReturnedDynamic(block, id)
+    const operation = child && child.operation
+    if (!operation) {
+      if (child && isStableTemplateSlotRoot(child, context)) {
+        hasValidRoot = true
+      }
+      continue
+    }
+
+    switch (operation.type) {
+      case IRNodeTypes.CREATE_COMPONENT_NODE:
+        if (!operation.dynamic || operation.dynamic.isStatic) {
+          hasValidRoot = true
+          continue
+        }
+        // Align with VDOM fallback semantics:
+        // <component :is="view" /> renders fallback when view is null because
+        // the dynamic component root becomes a comment vnode. This differs from
+        // <Foo />, whose component vnode is valid slot content even if Foo
+        // renders null/comment. Keep scanning because a stable sibling can
+        // still make the whole slot content valid.
+        continue
+      case IRNodeTypes.KEY:
+        if (hasStableSlotRoot(operation.block, context)) {
+          hasValidRoot = true
+          continue
+        }
+        continue
+      default:
+        continue
+    }
+  }
+  return hasValidRoot
+}
+
+function isStableTemplateSlotRoot(
+  child: IRDynamicInfo,
+  context: CodegenContext,
+): boolean {
+  if (child.template == null) return false
+  const content = context.ir.template.entries[child.template].content
+  // Preserved whitespace is a real text root; trim only for comment detection.
+  return content !== '' && !commentOnlyTemplateRE.test(content.trim())
 }

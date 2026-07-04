@@ -204,8 +204,9 @@ describe('vdomInterop', () => {
       const host = document.createElement('div')
       app.mount(host)
 
-      const onUpdated = vi.fn()
-      frag.onUpdated = [onUpdated]
+      const calls: string[] = []
+      frag.onBeforeUpdate = [() => calls.push('beforeUpdate')]
+      frag.onUpdated = [() => calls.push('updated')]
 
       const getNodes = () =>
         (Array.isArray(frag.nodes) ? frag.nodes : [frag.nodes]).filter(Boolean)
@@ -222,7 +223,7 @@ describe('vdomInterop', () => {
       expect(getNodes().some((n: Node) => n instanceof HTMLDivElement)).toBe(
         true,
       )
-      expect(onUpdated).toHaveBeenCalled()
+      expect(calls).toEqual(['beforeUpdate', 'updated'])
     })
 
     test('mounts vnode slot content after active fallback without reusing invalid vnode content', async () => {
@@ -1416,6 +1417,44 @@ describe('vdomInterop', () => {
       expect(html()).toBe('<span>updated</span>')
     })
 
+    test('keeps normalized VDOM slot identity stable across Vapor updates', async () => {
+      const tick = ref(0)
+      const slot = () => h('span', 'default slot')
+      const observedSlots: unknown[] = []
+
+      const VaporChild = defineVaporComponent({
+        setup() {
+          const slots = useSlots()
+          renderEffect(() => {
+            observedSlots.push(slots.default)
+          })
+          return createSlot('default', null)
+        },
+      })
+
+      const { html } = define({
+        setup() {
+          return () =>
+            h(
+              VaporChild as any,
+              { tick: tick.value },
+              {
+                default: slot,
+              },
+            )
+        },
+      }).render()
+
+      expect(html()).toBe('<span>default slot</span>')
+      expect(observedSlots).toHaveLength(1)
+
+      tick.value++
+      await nextTick()
+
+      expect(observedSlots).toHaveLength(2)
+      expect(observedSlots[1]).toBe(observedSlots[0])
+    })
+
     test('applies v-once to VDOM slot content passed to Vapor', async () => {
       const msg = ref('default slot')
       const VaporChild = defineVaporComponent(() =>
@@ -2099,6 +2138,49 @@ describe('vdomInterop', () => {
       await nextTick()
 
       expect(getLabels()).toEqual(['Vitest', 'Cypress'])
+    })
+
+    test('slots.default() delayed by VDOM child should not warn when vapor slot contains v-for', async () => {
+      const data = ref(['Vue', 'Vapor'])
+
+      const VDomClientOnly = defineComponent({
+        setup(_, { slots }) {
+          const show = ref(false)
+          onMounted(() => {
+            show.value = true
+          })
+          return () => h('section', null, show.value ? slots.default?.() : [])
+        },
+      })
+
+      const VaporChild = compile(
+        `<template>
+          <components.VDomClientOnly>
+            <span v-for="item in data" :key="item">{{ item }}</span>
+          </components.VDomClientOnly>
+        </template>`,
+        data,
+        {
+          VDomClientOnly,
+        },
+      )
+
+      const { html } = define({
+        setup() {
+          return () => h(VaporChild as any)
+        },
+      }).render()
+
+      expect(html()).toBe('<section></section>')
+
+      await nextTick()
+
+      expect(html()).toBe(
+        '<section><span>Vue</span><span>Vapor</span><!--for--></section>',
+      )
+      expect(
+        'createFor() can only be used inside setup()',
+      ).not.toHaveBeenWarned()
     })
 
     test('slots.default() access should return a stable wrapper', () => {

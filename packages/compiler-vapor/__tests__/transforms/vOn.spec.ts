@@ -208,6 +208,33 @@ describe('v-on', () => {
     )
   })
 
+  test('should handle setup-let assignment w/ inline: true', () => {
+    const { code, helpers } = compileWithVOn(
+      `<div @click="x=y"/><div @click="x++"/><div @click="{ x } = y"/>`,
+      {
+        mode: 'module',
+        inline: true,
+        bindingMetadata: {
+          x: BindingTypes.SETUP_LET,
+          y: BindingTypes.SETUP_MAYBE_REF,
+        },
+      },
+    )
+
+    expect(code).matchSnapshot()
+    expect(helpers).contains('isRef')
+    expect(helpers).contains('unref')
+    expect(code).contains(
+      `n0.$evtclick = _createInvoker(() => (_isRef(x) ? x.value = _unref(y) : x=_unref(y)))`,
+    )
+    expect(code).contains(
+      `n1.$evtclick = _createInvoker(() => (_isRef(x) ? x.value++ : x++))`,
+    )
+    expect(code).contains(
+      `n2.$evtclick = _createInvoker(() => ({ x } = _unref(y)))`,
+    )
+  })
+
   test('should handle multiple inline statement', () => {
     const { ir, code } = compileWithVOn(`<div @click="foo();bar()"/>`)
 
@@ -683,6 +710,64 @@ describe('v-on', () => {
     )
   })
 
+  test('should prioritize right over middle for click event normalization', () => {
+    const { code, ir } = compileWithVOn(
+      `<div @click.middle.right="test"/><div @click.right.middle="test"/>`,
+    )
+    expect(ir.block.operation).toMatchObject([
+      {
+        type: IRNodeTypes.SET_EVENT,
+        key: {
+          type: NodeTypes.SIMPLE_EXPRESSION,
+          content: 'contextmenu',
+          isStatic: true,
+        },
+        modifiers: { nonKeys: ['middle', 'right'] },
+        keyOverride: undefined,
+      },
+      {
+        type: IRNodeTypes.SET_EVENT,
+        key: {
+          type: NodeTypes.SIMPLE_EXPRESSION,
+          content: 'contextmenu',
+          isStatic: true,
+        },
+        modifiers: { nonKeys: ['right', 'middle'] },
+        keyOverride: undefined,
+      },
+    ])
+    expect(code).toContain('$evtcontextmenu')
+    expect(code).not.toContain('$evtmouseup')
+
+    const { code: code2, ir: ir2 } = compileWithVOn(
+      `<div @[event].middle.right="test"/><div @[event].right.middle="test"/>`,
+    )
+    expect(ir2.block.effect.map(effect => effect.operations[0])).toMatchObject([
+      {
+        type: IRNodeTypes.SET_EVENT,
+        key: {
+          type: NodeTypes.SIMPLE_EXPRESSION,
+          content: 'event',
+          isStatic: false,
+        },
+        modifiers: { nonKeys: ['middle', 'right'] },
+        keyOverride: ['click', 'contextmenu'],
+      },
+      {
+        type: IRNodeTypes.SET_EVENT,
+        key: {
+          type: NodeTypes.SIMPLE_EXPRESSION,
+          content: 'event',
+          isStatic: false,
+        },
+        modifiers: { nonKeys: ['right', 'middle'] },
+        keyOverride: ['click', 'contextmenu'],
+      },
+    ])
+    expect(code2).toContain('=== "click" ? "contextmenu"')
+    expect(code2).not.toContain('"mouseup"')
+  })
+
   test('should not prefix member expression', () => {
     const { code } = compileWithVOn(`<div @click="foo.bar"/>`, {
       prefixIdentifiers: true,
@@ -702,6 +787,23 @@ describe('v-on', () => {
       {
         type: IRNodeTypes.SET_EVENT,
         delegate: true,
+      },
+    ])
+  })
+
+  test('should allow disabling event delegation', () => {
+    const { code, ir, helpers } = compileWithVOn(`<div @click="test"/>`, {
+      eventDelegation: false,
+    })
+
+    expect(code).toMatchSnapshot()
+    expect(helpers).not.contains('delegate')
+    expect(helpers).not.contains('delegateEvents')
+    expect(code).contains('_on(n0, "click", e => _ctx.test(e))')
+    expect(ir.block.operation).toMatchObject([
+      {
+        type: IRNodeTypes.SET_EVENT,
+        delegate: false,
       },
     ])
   })

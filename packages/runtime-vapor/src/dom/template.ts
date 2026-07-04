@@ -2,12 +2,15 @@ import {
   adoptTemplate,
   advanceHydrationNode,
   currentHydrationNode,
+  hydrateTextNode,
+  isComment,
   isHydrating,
   resolveHydrationTarget,
   validateHydrationTarget,
 } from './hydration'
 import { type Namespace, Namespaces, TemplateFlags } from '@vue/shared'
 import { _child, createTextNode } from './node'
+import { resolvePendingSlotContent } from './hydrateFragment'
 
 let t: HTMLTemplateElement
 
@@ -18,24 +21,42 @@ export function template(html: string, flags: number = 0, ns?: Namespace) {
   let node: Node
   return (): Node & { $root?: true } => {
     if (isHydrating) {
+      // Comment templates may be empty branch anchors. Only real DOM/text
+      // templates prove that slot content is valid.
+      if (!(html[0] === '<' && html[1] === '!')) {
+        resolvePendingSlotContent()
+      }
       let adopted: Node | null = null
       // static templates only need to skip fragment markers, teleport
       // markers, and hydration anchors before advancing the hydration
       // cursor, so they don't need to go through adoptTemplate. Vapor
       // never mutates their DOM afterwards.
-      if (isStatic) {
+      if (
+        isStatic &&
+        // SSR empty branches are empty comments. Let adoptTemplate() replace
+        // them when the client selected this static branch.
+        !isComment(currentHydrationNode!, '')
+      ) {
         adopted = resolveHydrationTarget(currentHydrationNode!)
-        if (
-          (__DEV__ || __FEATURE_PROD_HYDRATION_MISMATCH_DETAILS__) &&
-          html !== ''
-        ) {
-          validateHydrationTarget(adopted, html)
+        if (html !== '') {
+          if (html[0] !== '<') {
+            // Static text normally matches, but patch the rare mismatch to
+            // align with vdom text hydration.
+            if (
+              !hydrateTextNode(adopted, html) &&
+              (__DEV__ || __FEATURE_PROD_HYDRATION_MISMATCH_DETAILS__)
+            ) {
+              validateHydrationTarget(adopted, html)
+            }
+          } else if (__DEV__ || __FEATURE_PROD_HYDRATION_MISMATCH_DETAILS__) {
+            validateHydrationTarget(adopted, html)
+          }
         }
-        node = adopted.cloneNode(true)
+        // cache once for post-hydration CSR clones.
+        if (!node) node = adopted.cloneNode(true)
         advanceHydrationNode(adopted)
       } else {
-        // do not cache the adopted node in node because it contains child nodes
-        // this avoids duplicate rendering of children
+        // do not assign `adopted` to `node`, or CSR clones would duplicate children.
         adopted = adoptTemplate(currentHydrationNode!, html, false, ns)!
       }
       if (root) (adopted as any).$root = true

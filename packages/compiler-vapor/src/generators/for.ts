@@ -12,7 +12,6 @@ import {
   type IRDynamicInfo,
   type IREffect,
   IRNodeTypes,
-  isBlockOperation,
 } from '../ir'
 import {
   type CodeFragment,
@@ -78,12 +77,8 @@ export function genFor(
     idMap[indexVar] = null
   }
 
-  const { selectorPatterns, keyOnlyBindingPatterns } = matchPatterns(
-    render,
-    keyProp,
-    idMap,
-    context,
-  )
+  const { selectorPatterns, keyOnlyBindingPatterns, skippedEffectIndexes } =
+    matchPatterns(render, keyProp, idMap, context)
   const selectorDeclarations: CodeFragment[] = []
   const selectorName = (i: number) =>
     selectorPatterns.length > 1 ? `_selector${id}_${i}` : `_selector${id}`
@@ -105,32 +100,38 @@ export function genFor(
     frag.push('(', ...args, ') => {', INDENT_START)
     if (selectorPatterns.length || keyOnlyBindingPatterns.length) {
       frag.push(
-        ...genBlockContent(render, context, false, () => {
-          const patternFrag: CodeFragment[] = []
+        ...genBlockContent(
+          render,
+          context,
+          false,
+          () => {
+            const patternFrag: CodeFragment[] = []
 
-          for (let i = 0; i < selectorPatterns.length; i++) {
-            const { effect } = selectorPatterns[i]
-            patternFrag.push(
-              NEWLINE,
-              `${selectorName(i)}(`,
-              ...genExpression(keyProp!, context),
-              `, () => {`,
-              INDENT_START,
-            )
-            for (const oper of effect.operations) {
-              patternFrag.push(...genOperation(oper, context))
+            for (let i = 0; i < selectorPatterns.length; i++) {
+              const { effect } = selectorPatterns[i]
+              patternFrag.push(
+                NEWLINE,
+                `${selectorName(i)}(`,
+                ...genExpression(keyProp!, context),
+                `, () => {`,
+                INDENT_START,
+              )
+              for (const oper of effect.operations) {
+                patternFrag.push(...genOperation(oper, context))
+              }
+              patternFrag.push(INDENT_END, NEWLINE, `})`)
             }
-            patternFrag.push(INDENT_END, NEWLINE, `})`)
-          }
 
-          for (const { effect } of keyOnlyBindingPatterns) {
-            for (const oper of effect.operations) {
-              patternFrag.push(...genOperation(oper, context))
+            for (const { effect } of keyOnlyBindingPatterns) {
+              for (const oper of effect.operations) {
+                patternFrag.push(...genOperation(oper, context))
+              }
             }
-          }
 
-          return patternFrag
-        }),
+            return patternFrag
+          },
+          skippedEffectIndexes,
+        ),
       )
     } else {
       frag.push(...genBlockContent(render, context))
@@ -140,25 +141,14 @@ export function genFor(
   }, idMap)
   exitScope()
 
-  let flags = 0
-  if (onlyChild) {
-    flags |= VaporVForFlags.FAST_REMOVE
-  }
-  if (component) {
-    flags |= VaporVForFlags.IS_COMPONENT
-  }
-  if (isFragmentBlock(render)) {
-    flags |= VaporVForFlags.IS_FRAGMENT
-  }
-  if (!component && isSingleNodeBlock(render)) {
-    flags |= VaporVForFlags.IS_SINGLE_NODE
-  }
-  if (once) {
-    flags |= VaporVForFlags.ONCE
-  }
-  if (slotRoot) {
-    flags |= VaporVForFlags.SLOT_ROOT
-  }
+  const flags = genForFlags(
+    onlyChild,
+    component,
+    isFragmentBlock(render),
+    !component && isSingleNodeBlock(render),
+    once,
+    slotRoot,
+  )
 
   const onResetCalls: CodeFragment[] = []
   for (let i = 0; i < selectorPatterns.length; i++) {
@@ -174,8 +164,7 @@ export function genFor(
       sourceExpr,
       blockFn,
       genCallback(keyProp),
-      flags ? String(flags) : undefined,
-      // todo: hydrationNode
+      flags,
     ),
     ...onResetCalls,
   ]
@@ -206,6 +195,49 @@ export function genFor(
     idToPathMap.forEach((_, id) => (idMap[id] = null))
     return idMap
   }
+}
+
+function genForFlags(
+  onlyChild: boolean | undefined,
+  component: boolean | undefined,
+  isFragment: boolean,
+  isSingleNode: boolean,
+  once: boolean | undefined,
+  slotRoot: boolean | undefined,
+): string | undefined {
+  let flags = 0
+  const names: string[] = []
+
+  if (onlyChild) {
+    flags |= VaporVForFlags.FAST_REMOVE
+    names.push('FAST_REMOVE')
+  }
+  if (component) {
+    flags |= VaporVForFlags.IS_COMPONENT
+    names.push('IS_COMPONENT')
+  }
+  if (isFragment) {
+    flags |= VaporVForFlags.IS_FRAGMENT
+    names.push('IS_FRAGMENT')
+  }
+  if (isSingleNode) {
+    flags |= VaporVForFlags.IS_SINGLE_NODE
+    names.push('IS_SINGLE_NODE')
+  }
+  if (once) {
+    flags |= VaporVForFlags.ONCE
+    names.push('ONCE')
+  }
+  if (slotRoot) {
+    flags |= VaporVForFlags.SLOT_ROOT
+    names.push('SLOT_ROOT')
+  }
+
+  if (!flags) {
+    return undefined
+  }
+
+  return __DEV__ ? `${flags} /* ${names.join(', ')} */` : String(flags)
 }
 
 function isSingleNodeBlock(block: BlockIRNode): boolean {
@@ -384,65 +416,47 @@ function matchPatterns(
   const keyOnlyBindingPatterns: NonNullable<
     ReturnType<typeof matchKeyOnlyBindingPattern>
   >[] = []
-  const removedEffectIndexes: number[] = []
+  let skippedEffectIndexes: Set<number> | undefined
 
-  render.effect = render.effect.filter((effect, index) => {
-    if (keyProp !== undefined) {
-      const selector = matchSelectorPattern(
-        effect,
-        keyProp.content,
-        idMap,
-        context,
-      )
-      if (selector) {
-        selectorPatterns.push(selector)
-        removedEffectIndexes.push(index)
-        return false
-      }
-      const keyOnly = matchKeyOnlyBindingPattern(effect, keyProp.content)
-      if (keyOnly) {
-        keyOnlyBindingPatterns.push(keyOnly)
-        removedEffectIndexes.push(index)
-        return false
-      }
+  if (keyProp === undefined) {
+    return {
+      keyOnlyBindingPatterns,
+      selectorPatterns,
+      skippedEffectIndexes,
     }
+  }
 
-    return true
-  })
-
-  if (removedEffectIndexes.length) {
-    shiftEffectBoundaries(render.dynamic, removedEffectIndexes)
+  for (let index = 0; index < render.effect.length; index++) {
+    const effect = render.effect[index]
+    const selector = matchSelectorPattern(
+      effect,
+      keyProp.content,
+      idMap,
+      context,
+    )
+    if (selector) {
+      selectorPatterns.push(selector)
+      skipEffect(index)
+      continue
+    }
+    const keyOnly = matchKeyOnlyBindingPattern(effect, keyProp.content)
+    if (keyOnly) {
+      keyOnlyBindingPatterns.push(keyOnly)
+      skipEffect(index)
+    }
   }
 
   return {
     keyOnlyBindingPatterns,
     selectorPatterns,
+    skippedEffectIndexes,
   }
-}
 
-function shiftEffectBoundaries(
-  dynamic: IRDynamicInfo,
-  removedEffectIndexes: number[],
-): void {
-  const operation = dynamic.operation
-  if (
-    operation &&
-    isBlockOperation(operation) &&
-    operation.effectIndex !== undefined
-  ) {
-    let offset = 0
-    for (const removedIndex of removedEffectIndexes) {
-      if (removedIndex < operation.effectIndex) {
-        offset++
-      } else {
-        break
-      }
+  function skipEffect(index: number): void {
+    if (!skippedEffectIndexes) {
+      skippedEffectIndexes = new Set()
     }
-    operation.effectIndex -= offset
-  }
-
-  for (const child of dynamic.children) {
-    shiftEffectBoundaries(child, removedEffectIndexes)
+    skippedEffectIndexes.add(index)
   }
 }
 

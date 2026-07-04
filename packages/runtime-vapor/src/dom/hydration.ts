@@ -2,6 +2,7 @@ import {
   MismatchTypes,
   isMismatchAllowed,
   isHydrating as isVdomHydrating,
+  logMismatchError,
   warn,
 } from '@vue/runtime-dom'
 import { type Namespace, Namespaces } from '@vue/shared'
@@ -80,6 +81,7 @@ function performHydration<T>(
     ;(Node.prototype as any).$idx = undefined
     ;(Node.prototype as any).$llc = undefined
     ;(Node.prototype as any).$vha = undefined
+    ;(Node.prototype as any).$rcn = undefined
 
     isOptimized = true
   }
@@ -143,6 +145,13 @@ type Anchor = Node & {
   // cached matching fragment end to avoid repeated traversal on nested
   // comment fragments.
   $fe?: Anchor
+}
+
+type RecreatedNode = Node & {
+  // Set on nodes rebuilt by mismatch recovery. The server never rendered
+  // these nodes, so hydration-mode prop setters must write to them like a
+  // client-side mount instead of adopting them check-only.
+  $rcn?: 1
 }
 
 type CommentAnchor = Comment & Anchor
@@ -230,14 +239,7 @@ function adoptTemplateImpl(
     node = resolveHydrationTarget(node)
   }
 
-  const type = node.nodeType
-  if (
-    // comment node
-    (type === 8 && !template.startsWith('<!')) ||
-    // element node
-    (type === 1 &&
-      !template.startsWith(`<` + (node as Element).tagName.toLowerCase()))
-  ) {
+  if (!matchesHydrationTarget(node, template)) {
     node = handleMismatch(node, template, adoptChildren, ns)
   }
 
@@ -358,7 +360,10 @@ function handleMismatch(
 
   // fast path for text nodes
   if (template[0] !== '<') {
-    return container.insertBefore(createTextNode(template), next)
+    return container.insertBefore(
+      markRecreatedNode(createTextNode(template)),
+      next,
+    )
   }
 
   // element node
@@ -372,6 +377,15 @@ function handleMismatch(
     t.innerHTML = template
     newNode = _child(t.content).cloneNode(true) as Element
   }
+  markRecreatedNode(newNode)
+  if (newNode.nodeType === 1) {
+    // Mark template-born descendants before adopting server children below,
+    // so adopted server content keeps normal check-only hydration semantics.
+    const descendants = newNode.querySelectorAll('*')
+    for (let i = 0; i < descendants.length; i++) {
+      markRecreatedNode(descendants[i])
+    }
+  }
   if (adoptChildren && node.nodeType === 1 && !newNode.firstChild) {
     let child = node.firstChild
     while (child) {
@@ -384,34 +398,72 @@ function handleMismatch(
   return newNode
 }
 
-export function validateHydrationTarget(node: Node, template: string): void {
+/**
+ * Whether a server-rendered node can be adopted for the given client
+ * template: the node type must match the template's expected type, and
+ * element tags must match exactly — a prefix check is not enough
+ * (e.g. a server `<i>` must not be adopted for a client `<ins>`).
+ */
+function matchesHydrationTarget(node: Node, template: string): boolean {
   let expectedType: number
   if (template[0] !== '<') {
+    // text
     expectedType = 3
   } else if (template[1] === '!') {
+    // comment
     expectedType = 8
   } else {
+    // element
     expectedType = 1
   }
 
   if (node.nodeType !== expectedType) {
-    warnHydrationNodeMismatch(node, template)
-    return
+    return false
   }
 
   if (expectedType !== 1) {
-    return
+    return true
   }
 
   const match = START_TAG_RE.exec(template)
   const expectedTag = match && match[1]
+  return (
+    !expectedTag ||
+    (node as Element).tagName.toLowerCase() === expectedTag.toLowerCase()
+  )
+}
 
-  if (
-    expectedTag &&
-    (node as Element).tagName.toLowerCase() !== expectedTag.toLowerCase()
-  ) {
+export function validateHydrationTarget(node: Node, template: string): void {
+  if (!matchesHydrationTarget(node, template)) {
     warnHydrationNodeMismatch(node, template)
   }
+}
+
+export function hydrateTextNode(node: Node, expected: string): boolean {
+  if (node.nodeType !== 3) {
+    return false
+  }
+  const text = node as Text
+  if (text.data === expected) {
+    return true
+  }
+  const parent = text.parentElement
+  if (parent && !isMismatchAllowed(parent, MismatchTypes.TEXT)) {
+    ;(__DEV__ || __FEATURE_PROD_HYDRATION_MISMATCH_DETAILS__) &&
+      warnHydrationTextMismatch(text, expected)
+    logMismatchError()
+  }
+  text.data = expected
+  return true
+}
+
+export function warnHydrationTextMismatch(node: Text, expected: string): void {
+  warn(
+    `Hydration text mismatch in`,
+    node.parentNode,
+    `\n  - rendered on server: ${JSON.stringify(node.data)}` +
+      `\n  - expected on client: ${JSON.stringify(expected)}`,
+  )
 }
 
 function warnHydrationNodeMismatch(node: Node, expected: unknown): void {
@@ -422,24 +474,14 @@ function warnHydrationNodeMismatch(node: Node, expected: unknown): void {
         node,
         node.nodeType === 3
           ? `(text)`
-          : isComment(node, '[[')
-            ? `(start of block node)`
+          : isComment(node, '[')
+            ? `(start of fragment)`
             : ``,
         `\n- expected on client:`,
         expected,
       )
     logMismatchError()
   }
-}
-
-let hasLoggedMismatchError = false
-export const logMismatchError = (): void => {
-  if (__TEST__ || hasLoggedMismatchError) {
-    return
-  }
-  // this error should show up in production
-  console.error('Hydration completed but contains mismatches.')
-  hasLoggedMismatchError = true
 }
 
 export function removeFragmentNodes(node: Node, endAnchor?: Node): void {
@@ -483,21 +525,64 @@ function removeHydrationNode(node: Node, close: Node | null = null): void {
   remove(node, parent)
 }
 
-export function cleanupHydrationTail(node: Node, container?: ParentNode): void {
+/**
+ * Removes unclaimed server-rendered nodes and reports a children mismatch.
+ * Trims `node` alone by default, the rest of `container`'s child list when
+ * `container` is given, or the logical siblings up to `close` when leaving a
+ * hydration boundary (which also moves the cursor onto `close`). Range cleanup
+ * keeps reused hydration anchors in place.
+ */
+export function cleanupHydrationTail(
+  node: Node,
+  container?: ParentNode,
+  close: Node | null = null,
+): void {
+  if (close) {
+    // A boundary only owns cleanup while the hydration cursor is still inside
+    // its SSR range. If nested hydration has already advanced past `close`,
+    // stop here so we don't delete sibling or parent-owned SSR nodes by
+    // mistake. When the range holds nothing but reused anchors, there is no
+    // mismatch to report either - just move the cursor onto `close`.
+    let cur: Node | null = node
+    let hasRemovableNode = false
+    while (cur && cur !== close) {
+      if (!isHydrationAnchor(cur)) {
+        hasRemovableNode = true
+      }
+      cur = nextLogicalSibling(cur)
+    }
+    if (!cur) return
+    if (!hasRemovableNode) {
+      setCurrentHydrationNode(close)
+      return
+    }
+  }
+
   const mismatchContainer = container || node.parentElement
   if (mismatchContainer instanceof Element) {
     warnHydrationChildrenMismatch(mismatchContainer)
   }
-  if (!container) {
+
+  if (!container && !close) {
     removeHydrationNode(node)
     return
   }
 
   let current: Node | null = node
-  while (current && current.parentNode === container) {
+  while (
+    current &&
+    current !== close &&
+    (!container || current.parentNode === container)
+  ) {
     const next = nextLogicalSibling(current)
-    removeHydrationNode(current)
+    if (!isHydrationAnchor(current)) {
+      removeHydrationNode(current, close)
+    }
     current = next
+  }
+
+  if (close) {
+    setCurrentHydrationNode(close)
   }
 }
 
@@ -508,6 +593,15 @@ export function markHydrationAnchor<T extends Node>(node: T): T {
 
 export function isHydrationAnchor(node: Node | null | undefined): boolean {
   return !!node && (node as Anchor).$vha === 1
+}
+
+function markRecreatedNode<T extends Node>(node: T): T {
+  ;(node as RecreatedNode).$rcn = 1
+  return node
+}
+
+export function isRecreatedNode(node: Node | null | undefined): boolean {
+  return !!node && (node as RecreatedNode).$rcn === 1
 }
 
 export function resolveHydrationTarget(node: Node): Node {
@@ -533,46 +627,6 @@ export function resolveHydrationTarget(node: Node): Node {
   }
 }
 
-function finalizeHydrationBoundary(close: Node | null): void {
-  let node = currentHydrationNode
-
-  // Once the hydration cursor has already reached `close`, this scope has no
-  // unclaimed SSR nodes left to trim. Single-root paths commonly end up here,
-  // so there is no children-count mismatch to report for this boundary.
-  if (!close || !node || node === close) {
-    return
-  }
-
-  // This boundary only owns cleanup while the current cursor is still inside
-  // its SSR range. If nested hydration has already advanced past `close`, stop
-  // here so we don't delete sibling or parent-owned SSR nodes by mistake.
-  let cur: Node | null = node
-  let hasRemovableNode = false
-  while (cur && cur !== close) {
-    if (!isHydrationAnchor(cur)) {
-      hasRemovableNode = true
-    }
-    cur = nextLogicalSibling(cur)
-  }
-  if (!cur) return
-  if (!hasRemovableNode) {
-    setCurrentHydrationNode(close)
-    return
-  }
-
-  warnHydrationChildrenMismatch((close as Node).parentElement)
-
-  while (node && node !== close) {
-    const next = nextLogicalSibling(node)
-    if (!isHydrationAnchor(node)) {
-      removeHydrationNode(node, close)
-    }
-    node = next!
-  }
-
-  setCurrentHydrationNode(close)
-}
-
 function warnHydrationChildrenMismatch(container: Element | null): void {
   if (container && !isMismatchAllowed(container, MismatchTypes.CHILDREN)) {
     ;(__DEV__ || __FEATURE_PROD_HYDRATION_MISMATCH_DETAILS__) &&
@@ -587,6 +641,12 @@ function warnHydrationChildrenMismatch(container: Element | null): void {
 
 export function enterHydrationBoundary(close: Node | null): () => void {
   return () => {
-    finalizeHydrationBoundary(close)
+    // Once the hydration cursor has already reached `close`, this scope has
+    // no unclaimed SSR nodes left to trim. Single-root paths commonly end up
+    // here, so there is no children-count mismatch to report.
+    const node = currentHydrationNode
+    if (close && node && node !== close) {
+      cleanupHydrationTail(node, undefined, close)
+    }
   }
 }

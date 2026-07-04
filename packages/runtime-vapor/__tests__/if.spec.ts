@@ -1,7 +1,6 @@
 import {
   VaporKeepAlive,
   VaporTransition,
-  child,
   createComponent,
   createIf,
   defineVaporComponent,
@@ -14,8 +13,7 @@ import {
 import { nextTick, ref } from '@vue/runtime-dom'
 import { VaporBlockShape, VaporIfFlags } from '@vue/shared'
 import type { Mock } from 'vitest'
-import { ifFlags, makeRender } from './_utils'
-import { unmountComponent } from '../src/component'
+import { compile, ifFlags, makeRender } from './_utils'
 import { setElementText } from '../src/dom/prop'
 import type { DynamicFragment } from '../src/fragment'
 
@@ -144,6 +142,53 @@ describe('createIf', () => {
     ok1.value = false
     await nextTick()
     expect(host.innerHTML).toBe('<!--if-->')
+  })
+
+  test('should not mount stale nested branch when parent if becomes false', async () => {
+    const data = ref<{
+      nodes: string[] | null
+      plainText: string | null
+    }>({
+      nodes: ['foo'],
+      plainText: 'foo',
+    })
+    const childSetup = vi.fn()
+    const Child = defineVaporComponent({
+      props: {
+        nodes: { type: Array, required: true },
+      },
+      setup() {
+        childSetup()
+        return template('<div>child</div>')()
+      },
+    })
+    const App = compile(
+      `<script setup vapor>
+        const data = _data
+        const Child = _components.Child
+      </script>
+      <template>
+        <template v-if="data.nodes">
+          <span v-if="data.plainText !== null">{{ data.plainText }}</span>
+          <Child v-else :nodes="data.nodes" />
+        </template>
+      </template>`,
+      data,
+      { Child },
+    )
+
+    const { host } = define(App).render()
+
+    expect(host.innerHTML).toBe('<span>foo</span><!--if--><!--if-->')
+    expect(childSetup).not.toHaveBeenCalled()
+
+    data.value.plainText = null
+    data.value.nodes = null
+    await nextTick()
+
+    expect(host.innerHTML).toBe('<!--if-->')
+    expect(childSetup).not.toHaveBeenCalled()
+    expect(`type check failed for prop "nodes"`).not.toHaveBeenWarned()
   })
 
   test('with v-once', async () => {
@@ -493,113 +538,5 @@ describe('createIf', () => {
     ).render()
 
     expect(branch.$key).toBe(0)
-  })
-
-  // vapor custom directives have no lifecycle hooks.
-  test.todo('should work with directive hooks', async () => {
-    const calls: string[] = []
-    const show1 = ref(true)
-    const show2 = ref(true)
-    const update = ref(0)
-
-    const spyConditionFn1 = vi.fn(() => show1.value)
-    const spyConditionFn2 = vi.fn(() => show2.value)
-
-    const vDirective: any = {
-      created: (el: any, { value }: any) => calls.push(`${value} created`),
-      beforeMount: (el: any, { value }: any) =>
-        calls.push(`${value} beforeMount`),
-      mounted: (el: any, { value }: any) => calls.push(`${value} mounted`),
-      beforeUpdate: (el: any, { value }: any) =>
-        calls.push(`${value} beforeUpdate`),
-      updated: (el: any, { value }: any) => calls.push(`${value} updated`),
-      beforeUnmount: (el: any, { value }: any) =>
-        calls.push(`${value} beforeUnmount`),
-      unmounted: (el: any, { value }: any) => calls.push(`${value} unmounted`),
-    }
-
-    const t0 = template('<p></p>')
-    const { instance } = define(() => {
-      const n1 = createIf(
-        spyConditionFn1,
-        () => {
-          const n2 = t0() as ParentNode
-          withDirectives(child(n2), [[vDirective, () => (update.value, '1')]])
-          return n2
-        },
-        () =>
-          createIf(
-            spyConditionFn2,
-            () => {
-              const n2 = t0() as ParentNode
-              withDirectives(child(n2), [[vDirective, () => '2']])
-              return n2
-            },
-            () => {
-              const n2 = t0() as ParentNode
-              withDirectives(child(n2), [[vDirective, () => '3']])
-              return n2
-            },
-          ),
-      )
-      return [n1]
-    }).render()
-
-    await nextTick()
-    expect(calls).toEqual(['1 created', '1 beforeMount', '1 mounted'])
-    calls.length = 0
-    expect(spyConditionFn1).toHaveBeenCalledTimes(1)
-    expect(spyConditionFn2).toHaveBeenCalledTimes(0)
-
-    show1.value = false
-    await nextTick()
-    expect(calls).toEqual([
-      '1 beforeUnmount',
-      '2 created',
-      '2 beforeMount',
-      '1 unmounted',
-      '2 mounted',
-    ])
-    calls.length = 0
-    expect(spyConditionFn1).toHaveBeenCalledTimes(2)
-    expect(spyConditionFn2).toHaveBeenCalledTimes(1)
-
-    show2.value = false
-    await nextTick()
-    expect(calls).toEqual([
-      '2 beforeUnmount',
-      '3 created',
-      '3 beforeMount',
-      '2 unmounted',
-      '3 mounted',
-    ])
-    calls.length = 0
-    expect(spyConditionFn1).toHaveBeenCalledTimes(2)
-    expect(spyConditionFn2).toHaveBeenCalledTimes(2)
-
-    show1.value = true
-    await nextTick()
-    expect(calls).toEqual([
-      '3 beforeUnmount',
-      '1 created',
-      '1 beforeMount',
-      '3 unmounted',
-      '1 mounted',
-    ])
-    calls.length = 0
-    expect(spyConditionFn1).toHaveBeenCalledTimes(3)
-    expect(spyConditionFn2).toHaveBeenCalledTimes(2)
-
-    update.value++
-    await nextTick()
-    expect(calls).toEqual(['1 beforeUpdate', '1 updated'])
-    calls.length = 0
-    expect(spyConditionFn1).toHaveBeenCalledTimes(3)
-    expect(spyConditionFn2).toHaveBeenCalledTimes(2)
-
-    unmountComponent(instance!)
-    expect(calls).toEqual(['1 beforeUnmount', '1 unmounted'])
-    expect(spyConditionFn1).toHaveBeenCalledTimes(3)
-    expect(spyConditionFn2).toHaveBeenCalledTimes(2)
   })
 })

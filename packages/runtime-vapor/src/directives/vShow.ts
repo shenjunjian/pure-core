@@ -1,6 +1,7 @@
 import {
   MismatchTypes,
   type VShowElement,
+  logMismatchError,
   vShowHidden,
   vShowOriginalDisplay,
   warn,
@@ -10,12 +11,12 @@ import { renderEffect } from '../renderEffect'
 import { isVaporComponent } from '../component'
 import type { Block, TransitionBlock } from '../block'
 import { isArray } from '@vue/shared'
-import { isHydrating, logMismatchError } from '../dom/hydration'
-import { DynamicFragment, VaporFragment, isFragment } from '../fragment'
+import { isHydrating } from '../dom/hydration'
+import { isDynamicFragment, isFragment } from '../fragment'
 
 export interface PendingVShow {
   target: Block
-  setDisplay: () => void
+  apply: () => (() => void) | undefined
 }
 
 export let currentPendingVShows: PendingVShow[] | null = null
@@ -39,17 +40,19 @@ export function applyVShow(target: Block, source: () => any): void {
     return applyVShow(target[0], source)
   }
 
-  if (target instanceof DynamicFragment) {
+  if (isDynamicFragment(target)) {
     const update = target.update
-    target.update = (render, key) => {
-      update.call(target, render, key)
+    target.update = (...args) => {
+      const res = update.call(target, ...args)
       setDisplay(target, source())
+      return res
     }
-  } else if (target instanceof VaporFragment && target.insert) {
+  } else if (isFragment(target) && target.insert) {
     const insert = target.insert
-    target.insert = (parent, anchor) => {
-      insert.call(target, parent, anchor)
+    target.insert = (...args) => {
+      const res = insert.call(target, ...args)
       setDisplay(target, source())
+      return res
     }
   }
 
@@ -61,7 +64,7 @@ export function applyVShow(target: Block, source: () => any): void {
       // enter through the transition-aware branch.
       currentPendingVShows.push({
         target,
-        setDisplay: () => setDisplay(target, value),
+        apply: () => setDisplay(target, value, true),
       })
       return
     }
@@ -69,16 +72,20 @@ export function applyVShow(target: Block, source: () => any): void {
   })
 }
 
-function setDisplay(target: Block, value: unknown): void {
+function setDisplay(
+  target: Block,
+  value: unknown,
+  deferEnter = false,
+): (() => void) | undefined {
   if (isVaporComponent(target)) {
-    return setDisplay(target.block, value)
+    return setDisplay(target.block, value, deferEnter)
   }
   if (isArray(target)) {
     if (target.length === 0) return
-    if (target.length === 1) return setDisplay(target[0], value)
+    if (target.length === 1) return setDisplay(target[0], value, deferEnter)
   }
   if (isFragment(target)) {
-    return setDisplay(target.nodes, value)
+    return setDisplay(target.nodes, value, deferEnter)
   }
 
   if (target instanceof Element) {
@@ -93,6 +100,9 @@ function setDisplay(target: Block, value: unknown): void {
       if (value) {
         $transition.beforeEnter(target)
         el.style.display = el[vShowOriginalDisplay]!
+        if (deferEnter) {
+          return () => $transition.enter(target)
+        }
         $transition.enter(target)
       } else {
         // during initial render, the element is not yet inserted into the

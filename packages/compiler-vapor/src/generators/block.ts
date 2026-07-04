@@ -6,13 +6,9 @@ import type {
   IRDynamicInfo,
   IRSlots,
   IfIRNode,
+  OperationNode,
 } from '../ir'
-import {
-  IRNodeTypes,
-  IRSlotType,
-  type OperationNode,
-  isBlockOperation,
-} from '../ir'
+import { IRNodeTypes, IRSlotType, isBlockOperation } from '../ir'
 import {
   type CodeFragment,
   DELIMITERS_ARRAY,
@@ -31,7 +27,6 @@ import {
 } from './operation'
 import { genChildren, genSelf } from './template'
 import { toValidAssetId } from '@vue/compiler-dom'
-import { VaporSlotFlags } from '@vue/shared'
 
 export function genBlock(
   oper: BlockIRNode,
@@ -56,6 +51,7 @@ export function genBlockContent(
   context: CodegenContext,
   root?: boolean,
   genEffectsExtraFrag?: () => CodeFragment[],
+  skippedEffectIndexes?: Set<number>,
 ): CodeFragment[] {
   const [frag, push] = buildCodeFragment()
   const { dynamic, effect, operation, returns } = block
@@ -109,7 +105,7 @@ export function genBlockContent(
     }
 
     if (effectIndex < effectEnd) {
-      push(...genEffects(effect.slice(effectIndex, effectEnd), context))
+      push(...genEffectRange(effectIndex, effectEnd))
       effectIndex = effectEnd
     }
   }
@@ -154,7 +150,7 @@ export function genBlockContent(
     push(...genOperations(operation.slice(operationIndex), context))
   }
   if (effectIndex < effect.length) {
-    push(...genEffects(effect.slice(effectIndex), context, genEffectsExtraFrag))
+    push(...genEffectRange(effectIndex, effect.length, genEffectsExtraFrag))
   } else if (genEffectsExtraFrag) {
     push(...genEffects([], context, genEffectsExtraFrag))
   }
@@ -165,12 +161,34 @@ export function genBlockContent(
   const returnsCode: CodeFragment[] =
     returnNodes.length > 1
       ? genMulti(DELIMITERS_ARRAY, ...returnNodes)
-      : [returnNodes[0] || 'null']
+      : [returnNodes[0] || '[]']
   push(...returnsCode)
 
   resetBlock()
   context.singleUseAssetComponentNames = prevSingleUseAssetComponentNames
   return frag
+
+  function genEffectRange(
+    start: number,
+    end: number,
+    genExtraFrag?: () => CodeFragment[],
+  ): CodeFragment[] {
+    if (!skippedEffectIndexes) {
+      return genEffects(effect.slice(start, end), context, genExtraFrag)
+    }
+
+    const effects: typeof effect = []
+    for (let i = start; i < end; i++) {
+      if (!skippedEffectIndexes.has(i)) {
+        effects.push(effect[i])
+      }
+    }
+
+    if (effects.length || genExtraFrag) {
+      return genEffects(effects, context, genExtraFrag)
+    }
+    return []
+  }
 
   function genResolveAssets(
     kind: 'component' | 'directive',
@@ -196,8 +214,6 @@ export function markSlotRootOperations(block: BlockIRNode): void {
       markSlotRootIf(operation)
     } else if (operation.type === IRNodeTypes.FOR) {
       markSlotRootFor(operation)
-    } else if (operation.type === IRNodeTypes.SLOT_OUTLET_NODE) {
-      markSlotRootSlotOutlet(operation)
     } else if (operation.type === IRNodeTypes.CREATE_COMPONENT_NODE) {
       markSlotRootComponent(operation)
     }
@@ -226,22 +242,13 @@ function markSlotRootFor(operation: ForIRNode): void {
   markSlotRootOperations(operation.render)
 }
 
-function markSlotRootSlotOutlet(
-  operation: Extract<OperationNode, { type: IRNodeTypes.SLOT_OUTLET_NODE }>,
-): void {
-  operation.flags |= VaporSlotFlags.SLOT_ROOT
-  if (operation.fallback) {
-    markSlotRootOperations(operation.fallback)
-  }
-}
-
 function markSlotRootComponent(operation: CreateComponentIRNode): void {
   if (!operation.once && operation.dynamic && !operation.dynamic.isStatic) {
     operation.slotRoot = true
   }
 }
 
-function findReturnedDynamic(
+export function findReturnedDynamic(
   block: BlockIRNode,
   id: number,
 ): IRDynamicInfo | undefined {

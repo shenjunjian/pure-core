@@ -134,6 +134,88 @@ describe('api: template ref', () => {
     expect(fooEl.value).toBe(null)
   })
 
+  it('dynamic component ref binding keeps a stable update hook', async () => {
+    const Child = defineVaporComponent({
+      setup() {
+        return template('<div>child</div>')()
+      },
+    })
+    const fooEl = ref(null)
+    const barEl = ref(null)
+    const refKey = ref('foo')
+    let frag: any
+
+    const { render } = define({
+      setup() {
+        return {
+          foo: fooEl,
+          bar: barEl,
+        }
+      },
+      render() {
+        const n0 = createDynamicComponent(() => Child)
+        frag = n0
+        setTemplateRefBinding(n0, () => refKey.value)
+        return n0
+      },
+    })
+    render()
+    const updateHook = frag.onUpdated![0]
+
+    expect(frag.onUpdated).toHaveLength(1)
+
+    refKey.value = 'bar'
+    await nextTick()
+
+    expect(frag.onUpdated).toHaveLength(1)
+    expect(frag.onUpdated![0]).toBe(updateHook)
+    expect(fooEl.value).toBe(null)
+    expect(barEl.value).not.toBe(null)
+  })
+
+  it('dynamic component ref binding handles component and ref key switching together', async () => {
+    const One = defineVaporComponent({
+      setup(_, { expose }) {
+        expose({ name: 'one' })
+        return template('<div>one</div>')()
+      },
+    })
+    const Two = defineVaporComponent({
+      setup(_, { expose }) {
+        expose({ name: 'two' })
+        return template('<div>two</div>')()
+      },
+    })
+
+    const views = [One, Two]
+    const view = ref(0)
+    const refKey = ref<'foo' | 'bar'>('foo')
+    const foo = ref<any>(null)
+    const bar = ref<any>(null)
+
+    const { render } = define({
+      setup() {
+        return { foo, bar }
+      },
+      render() {
+        const n0 = createDynamicComponent(() => views[view.value])
+        setTemplateRefBinding(n0, () => refKey.value)
+        return n0
+      },
+    })
+
+    render()
+    expect(foo.value).toMatchObject({ name: 'one' })
+    expect(bar.value).toBe(null)
+
+    view.value = 1
+    refKey.value = 'bar'
+    await nextTick()
+
+    expect(foo.value).toBe(null)
+    expect(bar.value).toMatchObject({ name: 'two' })
+  })
+
   it('dynamic ref can be null or undefined without warning', async () => {
     const t0 = template('<div></div>')
     const el = ref(null)
@@ -171,6 +253,39 @@ describe('api: template ref', () => {
     await nextTick()
     expect(el.value).toBe(null)
     expect('Invalid template ref type:').not.toHaveBeenWarned()
+  })
+
+  it('dynamic direct refs with ref_keys clear the old ref', async () => {
+    const t0 = template('<div></div>')
+    const refKey = ref<'foo' | 'bar'>('foo')
+    let tRefs!: Record<'foo' | 'bar', ShallowRef>
+
+    const { render } = define({
+      setup() {
+        tRefs = {
+          foo: useTemplateRef('foo'),
+          bar: useTemplateRef('bar'),
+        }
+      },
+      render() {
+        const n0 = t0()
+        const setRef = createTemplateRefSetter()
+        renderEffect(() => {
+          const key = refKey.value
+          setRef(n0 as Element, tRefs[key], false, key)
+        })
+        return n0
+      },
+    })
+    const { host } = render()
+    expect(tRefs.foo.value).toBe(host.children[0])
+    expect(tRefs.bar.value).toBe(null)
+
+    refKey.value = 'bar'
+    await nextTick()
+
+    expect(tRefs.foo.value).toBe(null)
+    expect(tRefs.bar.value).toBe(host.children[0])
   })
 
   it('string ref unmount', async () => {
@@ -275,6 +390,32 @@ describe('api: template ref', () => {
     expect(fn1.mock.calls).toHaveLength(1)
     expect(fn2.mock.calls).toHaveLength(1)
     expect(fn2.mock.calls[0][0]).toBe(host.children[0])
+  })
+
+  it('function ref binding should not track dependencies read by callback', async () => {
+    const visible = ref(new Set<number>())
+    const fn = vi.fn((el: any) => {
+      if (!el || visible.value.has(0)) {
+        return
+      }
+      visible.value = new Set([0])
+    })
+
+    const t0 = template('<div></div>')
+    const { render } = define({
+      render() {
+        const n0 = t0()
+        setTemplateRefBinding(n0 as Element, () => fn)
+        return n0
+      },
+    })
+
+    render()
+    expect(fn).toHaveBeenCalledTimes(1)
+    expect(visible.value.has(0)).toBe(true)
+
+    await nextTick()
+    expect(fn).toHaveBeenCalledTimes(1)
   })
 
   it('function ref unmount', async () => {
@@ -1520,46 +1661,6 @@ describe('api: template ref', () => {
       __DEV__ = true
     }
   })
-
-  // TODO: can not reproduce in Vapor
-  // // #2078
-  // test('handling multiple merged refs', async () => {
-  //   const Foo = {
-  //     render: () => h('div', 'foo'),
-  //   }
-  //   const Bar = {
-  //     render: () => h('div', 'bar'),
-  //   }
-
-  //   const viewRef = shallowRef<any>(Foo)
-  //   const elRef1 = ref()
-  //   const elRef2 = ref()
-
-  //   const App = {
-  //     render() {
-  //       if (!viewRef.value) {
-  //         return null
-  //       }
-  //       const view = h(viewRef.value, { ref: elRef1 })
-  //       return h(view, { ref: elRef2 })
-  //     },
-  //   }
-  //   const root = nodeOps.createElement('div')
-  //   render(h(App), root)
-
-  //   expect(serializeInner(elRef1.value.$el)).toBe('foo')
-  //   expect(elRef1.value).toBe(elRef2.value)
-
-  //   viewRef.value = Bar
-  //   await nextTick()
-  //   expect(serializeInner(elRef1.value.$el)).toBe('bar')
-  //   expect(elRef1.value).toBe(elRef2.value)
-
-  //   viewRef.value = null
-  //   await nextTick()
-  //   expect(elRef1.value).toBeNull()
-  //   expect(elRef1.value).toBe(elRef2.value)
-  // })
 })
 
 describe('interop: template ref', () => {

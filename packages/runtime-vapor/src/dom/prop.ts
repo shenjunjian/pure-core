@@ -1,4 +1,5 @@
 import {
+  EMPTY_OBJ,
   type NormalizedStyle,
   camelize,
   canSetValueDirectly,
@@ -7,6 +8,7 @@ import {
   isArray,
   isOn,
   isString,
+  isSymbol,
   normalizeClass,
   normalizeCssVarValue,
   normalizeStyle,
@@ -24,7 +26,9 @@ import {
   isMismatchAllowed,
   isSetEqual,
   isValidHtmlOrSvgAttribute,
+  logMismatchError,
   mergeProps,
+  parseEventName,
   patchStyle,
   queuePostFlushCb,
   shouldSetAsProp,
@@ -42,7 +46,11 @@ import {
   isApplyingFallthroughProps,
   isVaporComponent,
 } from '../component'
-import { isHydrating, logMismatchError } from './hydration'
+import {
+  isHydrating,
+  isRecreatedNode,
+  warnHydrationTextMismatch,
+} from './hydration'
 import { type Block, normalizeBlock } from '../block'
 import type { VaporElement } from '../apiDefineCustomElement'
 
@@ -95,11 +103,9 @@ export function setAttr(
     ;(el as any)._falseValue = value
   }
 
-  if (
-    (__DEV__ || __FEATURE_PROD_HYDRATION_MISMATCH_DETAILS__) &&
-    isHydrating &&
-    !attributeHasMismatch(el, key, value)
-  ) {
+  if (isHydrating && !isRecreatedNode(el)) {
+    ;(__DEV__ || __FEATURE_PROD_HYDRATION_MISMATCH_DETAILS__) &&
+      attributeHasMismatch(el, key, value)
     el[`$${key}`] = value
     return
   }
@@ -114,7 +120,7 @@ export function setAttr(
       }
     } else {
       if (value != null) {
-        el.setAttribute(key, value)
+        el.setAttribute(key, isSymbol(value) ? String(value) : value)
       } else {
         el.removeAttribute(key)
       }
@@ -133,14 +139,12 @@ export function setDOMProp(
     return
   }
 
-  if (
-    (__DEV__ || __FEATURE_PROD_HYDRATION_MISMATCH_DETAILS__) &&
-    isHydrating &&
-    !attributeHasMismatch(el, key, value) &&
-    !shouldForceHydrate(el, key) &&
-    !forceHydrate
-  ) {
-    return
+  if (isHydrating && !isRecreatedNode(el)) {
+    ;(__DEV__ || __FEATURE_PROD_HYDRATION_MISMATCH_DETAILS__) &&
+      attributeHasMismatch(el, key, value)
+    if (!forceHydrate && !shouldForceHydrate(el, key)) {
+      return
+    }
   }
 
   const prev = el[key]
@@ -193,11 +197,9 @@ export function setClass(
     setClassIncremental(el, value, isNormalized)
   } else {
     if (!isNormalized) value = normalizeClass(value)
-    if (
-      (__DEV__ || __FEATURE_PROD_HYDRATION_MISMATCH_DETAILS__) &&
-      isHydrating &&
-      !classHasMismatch(el, value, false)
-    ) {
+    if (isHydrating && !isRecreatedNode(el)) {
+      ;(__DEV__ || __FEATURE_PROD_HYDRATION_MISMATCH_DETAILS__) &&
+        classHasMismatch(el, value, false)
       el.$cls = value
       return
     }
@@ -240,10 +242,7 @@ export function setClassName(
     value = value ? `${value} ${suffix}` : suffix
   }
 
-  if (
-    el.$root ||
-    ((__DEV__ || __FEATURE_PROD_HYDRATION_MISMATCH_DETAILS__) && isHydrating)
-  ) {
+  if (el.$root || isHydrating) {
     // Root fallthrough and hydration still need the existing setClass;
     // pass the rebuilt string as normalized to avoid doing that work twice.
     setClass(el, value, false, true)
@@ -261,11 +260,9 @@ function setClassIncremental(
   const cacheKey = `$clsi${isApplyingFallthroughProps ? '$' : ''}`
   const normalizedValue = isNormalized ? value : normalizeClass(value)
 
-  if (
-    (__DEV__ || __FEATURE_PROD_HYDRATION_MISMATCH_DETAILS__) &&
-    isHydrating &&
-    !classHasMismatch(el, normalizedValue, true)
-  ) {
+  if (isHydrating && !isRecreatedNode(el)) {
+    ;(__DEV__ || __FEATURE_PROD_HYDRATION_MISMATCH_DETAILS__) &&
+      classHasMismatch(el, normalizedValue, true)
     el[cacheKey] = normalizedValue
     return
   }
@@ -284,18 +281,50 @@ function setClassIncremental(
   }
 }
 
-/**
- * dev only
- * defer style matching checks until hydration completes (instance.block is set) if
- * the component uses style v-bind or the element contains CSS variables, to correctly
- * verify if the element is the component root.
- */
+// Defer css-var style mismatch checks until instance.block is set, so root
+// ownership can be resolved before adding owner css vars to expected styles.
 function shouldDeferCheckStyleMismatch(el: TargetElement): boolean {
   return (
-    __DEV__ &&
-    (!!currentInstance!.getCssVars ||
-      Object.values((el as HTMLElement).style).some(v => v.startsWith('--')))
+    hasCssVarsInOwnerChain(currentInstance as VaporComponentInstance | null) ||
+    hasCssVars((el as HTMLElement).style)
   )
+}
+
+function hasCssVarsInOwnerChain(
+  instance: VaporComponentInstance | null,
+): boolean {
+  while (instance) {
+    if ((instance as GenericComponentInstance).getCssVars) {
+      return true
+    }
+    instance = instance.parent as VaporComponentInstance | null
+  }
+  return false
+}
+
+function hasCssVars(style: CSSStyleDeclaration): boolean {
+  for (let i = 0; i < style.length; i++) {
+    if (style.item(i).startsWith('--')) {
+      return true
+    }
+  }
+  return false
+}
+
+function checkHydrationStyleMismatch(
+  el: TargetElement,
+  value: any,
+  normalizedValue: string | NormalizedStyle | undefined,
+  isIncremental: boolean,
+): void {
+  if (shouldDeferCheckStyleMismatch(el)) {
+    const instance = currentInstance as VaporComponentInstance
+    queuePostFlushCb(() => {
+      styleHasMismatch(el, value, normalizedValue, isIncremental, instance)
+    })
+  } else {
+    styleHasMismatch(el, value, normalizedValue, isIncremental)
+  }
 }
 
 export function setStyle(el: TargetElement, value: any): void {
@@ -303,24 +332,12 @@ export function setStyle(el: TargetElement, value: any): void {
     setStyleIncremental(el, value)
   } else {
     const normalizedValue = normalizeStyle(value)
-    if (
-      (__DEV__ || __FEATURE_PROD_HYDRATION_MISMATCH_DETAILS__) &&
-      isHydrating
-    ) {
-      if (shouldDeferCheckStyleMismatch(el)) {
-        const instance = currentInstance as VaporComponentInstance
-        queuePostFlushCb(() => {
-          if (!styleHasMismatch(el, value, normalizedValue, false, instance)) {
-            el.$sty = normalizedValue
-            return
-          }
-          patchStyle(el, el.$sty, (el.$sty = normalizedValue))
-        })
-        return
-      } else if (!styleHasMismatch(el, value, normalizedValue, false)) {
-        el.$sty = normalizedValue
-        return
+    if (isHydrating && !isRecreatedNode(el)) {
+      if (__DEV__ || __FEATURE_PROD_HYDRATION_MISMATCH_DETAILS__) {
+        checkHydrationStyleMismatch(el, value, normalizedValue, false)
       }
+      el.$sty = normalizedValue
+      return
     }
 
     patchStyle(el, el.$sty, (el.$sty = normalizedValue))
@@ -333,21 +350,12 @@ function setStyleIncremental(el: any, value: any): NormalizedStyle | undefined {
     ? parseStringStyle(value)
     : (normalizeStyle(value) as NormalizedStyle | undefined)
 
-  if ((__DEV__ || __FEATURE_PROD_HYDRATION_MISMATCH_DETAILS__) && isHydrating) {
-    if (shouldDeferCheckStyleMismatch(el)) {
-      const instance = currentInstance as VaporComponentInstance
-      queuePostFlushCb(() => {
-        if (!styleHasMismatch(el, value, normalizedValue, true, instance)) {
-          el[cacheKey] = normalizedValue
-          return
-        }
-        patchStyle(el, el[cacheKey], (el[cacheKey] = normalizedValue))
-      })
-      return
-    } else if (!styleHasMismatch(el, value, normalizedValue, true)) {
-      el[cacheKey] = normalizedValue
-      return
+  if (isHydrating && !isRecreatedNode(el)) {
+    if (__DEV__ || __FEATURE_PROD_HYDRATION_MISMATCH_DETAILS__) {
+      checkHydrationStyleMismatch(el, value, normalizedValue, true)
     }
+    el[cacheKey] = normalizedValue
+    return
   }
 
   patchStyle(el, el[cacheKey], (el[cacheKey] = normalizedValue))
@@ -366,14 +374,12 @@ export function setValue(
   // non-string values will be stringified.
   el._value = value
 
-  if (
-    (__DEV__ || __FEATURE_PROD_HYDRATION_MISMATCH_DETAILS__) &&
-    isHydrating &&
-    !attributeHasMismatch(el, 'value', getClientText(el, value)) &&
-    !shouldForceHydrate(el, 'value') &&
-    !forceHydrate
-  ) {
-    return
+  if (isHydrating && !isRecreatedNode(el)) {
+    ;(__DEV__ || __FEATURE_PROD_HYDRATION_MISMATCH_DETAILS__) &&
+      attributeHasMismatch(el, 'value', getClientText(el, value))
+    if (!forceHydrate && !shouldForceHydrate(el, 'value')) {
+      return
+    }
   }
 
   // #4956: <option> value will fallback to its text content so we need to
@@ -394,7 +400,7 @@ export function setValue(
  * `toDisplayString`
  */
 export function setText(el: Text & { $txt?: string }, value: string): void {
-  if (isHydrating) {
+  if (isHydrating && !isRecreatedNode(el) && !isRecreatedNode(el.parentNode)) {
     const clientText = getClientText(el.parentNode!, value)
     if (el.nodeValue == clientText) {
       el.$txt = clientText
@@ -404,12 +410,7 @@ export function setText(el: Text & { $txt?: string }, value: string): void {
     const parent = el.parentElement
     if (parent && !isMismatchAllowed(parent, MismatchTypes.TEXT)) {
       ;(__DEV__ || __FEATURE_PROD_HYDRATION_MISMATCH_DETAILS__) &&
-        warn(
-          `Hydration text mismatch in`,
-          el.parentNode,
-          `\n  - rendered on server: ${JSON.stringify((el as Text).data)}` +
-            `\n  - expected on client: ${JSON.stringify(value)}`,
-        )
+        warnHydrationTextMismatch(el, value)
       logMismatchError()
     }
   }
@@ -427,7 +428,7 @@ export function setElementText(
   value: unknown,
 ): void {
   value = toDisplayString(value)
-  if (isHydrating) {
+  if (isHydrating && !isRecreatedNode(el)) {
     let clientText = getClientText(el, value as string)
     if (el.textContent === clientText) {
       el.$txt = clientText
@@ -493,6 +494,13 @@ function setTextToBlock(block: Block, value: any): void {
 
 export function setHtml(el: TargetElement, value: any): void {
   value = value == null ? '' : unsafeToTrustedHTML(value)
+  // Align with vdom hydration: server-rendered innerHTML content is trusted
+  // as-is in all builds; no write, no compare, no warning. Caching the
+  // client value keeps the first post-hydration equal-value update a no-op.
+  if (isHydrating && !isRecreatedNode(el)) {
+    el.$html = value
+    return
+  }
   if (el.$html !== value) {
     el.innerHTML = el.$html = value
   }
@@ -503,6 +511,11 @@ export function setBlockHtml(
   value: any,
 ): void {
   value = value == null ? '' : unsafeToTrustedHTML(value)
+  // trust SSR content during hydration, see setHtml
+  if (isHydrating) {
+    block.$html = value
+    return
+  }
   if (block.$html !== value) {
     setHtmlToBlock(block, (block.$html = value))
   }
@@ -527,7 +540,7 @@ function setHtmlToBlock(block: Block, value: any): void {
 }
 
 export function setDynamicProps(el: any, args: any[], isSVG?: boolean): void {
-  const props = args.length > 1 ? mergeProps(...args) : args[0]
+  const props = args.length > 1 ? mergeProps(...args) : args[0] || EMPTY_OBJ
   const cacheKey = `$dprops${isApplyingFallthroughProps ? '$' : ''}`
   const prevProps = el[cacheKey] as Record<string, any> | undefined
   const nextProps: Record<string, any> = Object.create(null)
@@ -578,7 +591,8 @@ export function setDynamicProp(
     if (shouldSkipFallthroughKey(el, key)) {
       return
     }
-    onBinding(el, key[2].toLowerCase() + key.slice(3), value)
+    const [event, options] = parseEventName(key)
+    onBinding(el, event, value, options)
   } else if (
     // force hydrate v-bind with .prop modifiers
     (forceHydrate = key[0] === '.')

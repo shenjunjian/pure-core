@@ -166,6 +166,13 @@ describe('compiler: vModel transform', () => {
 
       expect(code).toMatchSnapshot()
     })
+
+    test('non-identifier modifiers should be quoted', () => {
+      const { code } = compileWithVModel('<input v-model.foo-bar="model" />')
+
+      expect(code).contains(`{ "foo-bar": true }`)
+      expect(code).not.contains(`{ foo-bar: true }`)
+    })
   })
 
   test('should support member expression', () => {
@@ -363,6 +370,18 @@ describe('compiler: vModel transform', () => {
           ],
         ],
       })
+    })
+
+    test('v-model with kebab-case argument for component should quote modelModifiers key', () => {
+      const cases = [
+        '<Comp v-model:foo-bar.trim="foo" />',
+        '<Comp v-bind="obj" v-model:foo-bar.trim="foo" />',
+      ]
+
+      for (const source of cases) {
+        const { code } = compileWithVModel(source)
+        expect(code).contain(`"foo-barModifiers": { trim: true }`)
+      }
     })
 
     test('v-model:model with arguments for component should generate modelModifiers$', () => {

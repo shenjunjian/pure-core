@@ -11,7 +11,6 @@ import {
   baseResolveTransitionHooks,
   checkTransitionMode,
   currentInstance,
-  getComponentName,
   getTransitionRawChildren,
   isAsyncWrapper,
   isTemplateNode,
@@ -19,15 +18,20 @@ import {
   onBeforeMount,
   queuePostFlushCb,
   resolveTransitionProps,
+  setCurrentInstance,
   useTransitionState,
+  vShowOriginalDisplay,
   warn,
 } from '@vue/runtime-dom'
 import { computed } from '@vue/reactivity'
-import type {
-  Block,
-  TransitionBlock,
-  TransitionOptions,
-  VaporTransitionHooks,
+import {
+  type Block,
+  type BlockFn,
+  type TransitionBlock,
+  type TransitionOptions,
+  type VaporTransitionHooks,
+  isValidBlock,
+  remove,
 } from '../block'
 import { displayName, registerTransitionHooks } from '../transition'
 import {
@@ -39,6 +43,7 @@ import { isArray } from '@vue/shared'
 import { renderEffect } from '../renderEffect'
 import {
   DynamicFragment,
+  ForBlock,
   ForFragment,
   type VaporFragment,
   isFragment,
@@ -59,13 +64,20 @@ export type ResolvedTransitionBlock = (
 ) &
   TransitionOptions
 
+type ResolveTransitionBlocksOptions = {
+  mode: 'single' | 'group'
+  onFragment?: (frag: VaporFragment) => void
+  onUpdateOwner?: (owner: VaporFragment | VaporComponentInstance) => void
+}
+
 let registered = false
 export const ensureTransitionHooksRegistered = (): void => {
   if (!registered) {
     registered = true
     registerTransitionHooks(
       applyTransitionHooksImpl,
-      applyTransitionLeaveHooksImpl,
+      deferBranchUpdateDuringLeaveImpl,
+      removeBranchWithLeaveImpl,
     )
   }
 }
@@ -178,24 +190,55 @@ export const VaporTransition: FunctionalVaporComponent<TransitionProps> =
       () => ((slots.default && slots.default()) || []) as any as Block,
     )
 
-    const { hooks, root } = applyResolvedTransitionHooks(children, {
+    let appliedHooks = {
       state,
       // use proxy to keep props reference stable
       props: propsProxy,
       instance: instance,
-    } as VaporTransitionHooks)
-    applyPendingVShows(hooks, root, pendingVShows)
-    if (shouldPerformAppear) performAppear(hooks)
+    } as VaporTransitionHooks
+    let isMounted = false
+    // Re-resolve hooks when reactive transition props (:name/:duration/event
+    // hooks/mode) change. The shared baseResolveTransitionHooks destructures
+    // props eagerly, so propsProxy alone can't keep an already-applied hooks
+    // closure live; re-applying rebinds the root element's (and any inner
+    // fragment's) $transition to fresh closures, mirroring VDOM's per-render
+    // re-resolve. Reusing appliedHooks preserves runtime state (persisted /
+    // delayedLeave) across re-resolves.
+    renderEffect(() => {
+      const { hooks, root } = applyResolvedTransitionHooks(
+        children,
+        appliedHooks,
+      )
+      appliedHooks = hooks
+      if (!isMounted) {
+        isMounted = true
+        applyPendingVShows(hooks, root, pendingVShows)
+        if (shouldPerformAppear) performAppear(hooks)
+      }
+    })
     return children
   })
 
 const transitionTypeMap = new WeakMap<ResolvedTransitionBlock, any>()
+const inheritedTransitionKeyMap = new WeakMap<
+  ResolvedTransitionBlock,
+  InheritedTransitionKeyRecord
+>()
+
+type InheritedTransitionKeyRecord = {
+  generation: number
+  rawBaseKey: any
+  inheritedKey: string
+}
+
+let transitionKeyGeneration = 0
+let currentTransitionKeyGeneration = 0
 
 function getTransitionType(block: ResolvedTransitionBlock): any {
   const type = transitionTypeMap.get(block)
   if (type !== undefined) return type
   if (block instanceof Element) return block.localName
-  if (isFragment(block) && block.vnode) {
+  if (isInteropEnabled && isFragment(block) && block.vnode) {
     const children = getTransitionRawChildren([block.vnode])
     if (children.length === 1) return children[0].type
   }
@@ -219,13 +262,8 @@ function getLeavingNodesForType(
 function getLeaveElement(
   block: ResolvedTransitionBlock,
 ): TransitionElement | undefined {
-  if (block instanceof Element) {
-    return block as TransitionElement
-  }
-  if (isInteropEnabled && isFragment(block) && block.vnode) {
-    const el = getTransitionElementFromVNode(block.vnode)
-    if (el) return el as TransitionElement
-  }
+  const el = getTransitionElement(block)
+  if (el) return el as TransitionElement
   if (
     isFragment(block) &&
     !isArray(block.nodes) &&
@@ -256,10 +294,17 @@ const getTransitionHooksContext = (
     },
     earlyRemove: () => {
       const leavingNode = leavingNodes[key]
-      const el = leavingNode && getLeaveElement(leavingNode)
-      if (el && el[leaveCbKey]) {
-        // force early removal (not cancelled)
-        el[leaveCbKey]!()
+      // Mirror VDOM's isSameVNodeType raw-key guard. The type dimension is
+      // already isolated by the leaving-cache bucket, but the slot index is
+      // String($key), which coerces e.g. 1 and '1' into the same slot. Compare
+      // the raw keys so a number-keyed leaving node isn't force-removed by a
+      // string-keyed entering node (and vice versa).
+      if (leavingNode && leavingNode.$key === block.$key) {
+        const el = getLeaveElement(leavingNode)
+        if (el && el[leaveCbKey]) {
+          // force early removal (not cancelled)
+          el[leaveCbKey]!()
+        }
       }
     },
     cloneHooks: block => {
@@ -360,9 +405,16 @@ function applyResolvedTransitionHooks(
     instance,
     hooks => (resolvedHooks = hooks as VaporTransitionHooks),
   )
-  // Dynamic slot updates replace the active hook object. Preserve any
-  // runtime-derived persisted state for slot/component-root v-show.
-  resolvedHooks.persisted = resolvedHooks.persisted || hooks.persisted
+  // Dynamic slot / branch swaps replace the active hook object. The previously
+  // derived persisted state (slot/component-root v-show, detected only at mount
+  // via applyPendingVShows) must carry forward when the new root is *also* a
+  // v-show root, but must NOT leak onto a non-v-show root — otherwise that
+  // root's structural removal would wrongly skip its leave animation. Gating
+  // the carry-forward on the current root's v-show marker keeps the latch tied
+  // to the live root; mount/non-appear paths are untouched because they never
+  // have a latched `hooks.persisted` to carry.
+  resolvedHooks.persisted =
+    resolvedHooks.persisted || (hooks.persisted && hasVShowMarker(child))
   resolvedHooks.delayedLeave = delayedLeave
   child.$transition = resolvedHooks
   fragments.forEach(f => (f.$transition = resolvedHooks))
@@ -436,77 +488,326 @@ function applyTransitionLeaveHooksImpl(
   }
 }
 
+function deferBranchUpdateDuringLeaveImpl(
+  frag: DynamicFragment,
+  render: BlockFn | undefined,
+  key: any,
+  noScope: boolean,
+): boolean {
+  const transition = frag.$transition!
+  if (!transition.state.isLeaving) return false
+  // Track the latest target key immediately so repeated updates during
+  // leave keep overwriting the pending branch instead of reviving stale
+  // keys when the deferred render finally runs.
+  frag.current = key
+  const pending = frag.pending
+  if (pending) {
+    pending.render = render
+    pending.key = key
+    pending.noScope = noScope
+  } else {
+    frag.pending = { render, key, noScope }
+  }
+  return true
+}
+
+function removeBranchWithLeaveImpl(
+  frag: DynamicFragment,
+  transition: VaporTransitionHooks,
+  parent: ParentNode | null,
+  render: BlockFn | undefined,
+  key: any,
+  noScope: boolean,
+): boolean {
+  const mode = transition.mode
+  if (
+    mode &&
+    // in-out only works when there is an incoming branch to trigger
+    // delayedLeave; otherwise the current branch should leave immediately.
+    (mode !== 'in-out' || render) &&
+    // out-in only needs to defer when the current branch actually has
+    // a rendered child to leave before mounting the next one.
+    (mode !== 'out-in' || isValidBlock(frag.nodes))
+  ) {
+    const instance = currentInstance
+    applyTransitionLeaveHooksImpl(frag.nodes, transition, () => {
+      // By the time this deferred out-in branch runs, the renderEffect
+      // has finished and currentInstance may have changed, so restore
+      // the captured instance.
+      const prevInstance = setCurrentInstance(instance)
+      try {
+        const pending = frag.pending
+        if (pending) {
+          frag.pending = undefined
+          frag.renderBranch(
+            pending.render,
+            transition,
+            parent,
+            pending.key,
+            pending.noScope,
+            true,
+          )
+        } else {
+          frag.renderBranch(render, transition, parent, key, noScope, true)
+        }
+      } finally {
+        setCurrentInstance(...prevInstance)
+      }
+    })
+    if (mode === 'out-in') {
+      // out-in owns the removal here so update() can return before
+      // rendering; the next branch mounts from the afterLeave callback.
+      // Record the target key immediately (mirroring the defer path) so
+      // `current` no longer points at the outgoing branch. Otherwise a
+      // toggle back to the original key during the leave would hit the
+      // `key === current` early-return in update() and be dropped, leaving
+      // the deferred render to mount the stale branch.
+      frag.current = key
+      parent && remove(frag.nodes, parent)
+      return true
+    }
+  }
+  return false
+}
+
 export function resolveTransitionBlock(
   block: Block,
   onFragment?: (frag: VaporFragment) => void,
 ): ResolvedTransitionBlock | undefined {
-  let child: ResolvedTransitionBlock | undefined
+  return resolveTransitionChildren(block, { mode: 'single', onFragment })[0]
+}
+
+export function resolveTransitionBlocks(
+  block: Block,
+  onFragment?: (frag: VaporFragment) => void,
+  onUpdateOwner?: (owner: VaporFragment | VaporComponentInstance) => void,
+): ResolvedTransitionBlock[] {
+  return resolveTransitionChildren(block, {
+    mode: 'group',
+    onFragment,
+    onUpdateOwner,
+  })
+}
+
+function resolveTransitionChildren(
+  block: Block,
+  options: ResolveTransitionBlocksOptions,
+): ResolvedTransitionBlock[] {
+  const children: ResolvedTransitionBlock[] = []
+  const prevGeneration = currentTransitionKeyGeneration
+  currentTransitionKeyGeneration = ++transitionKeyGeneration
+  try {
+    collectTransitionBlocks(block, options, children)
+    return children
+  } finally {
+    currentTransitionKeyGeneration = prevGeneration
+  }
+}
+
+function collectTransitionBlocks(
+  block: Block,
+  options: ResolveTransitionBlocksOptions,
+  children: ResolvedTransitionBlock[],
+): void {
   if (block instanceof Node) {
     // transition can only be applied on Element child
-    if (block instanceof Element) child = block
+    if (block instanceof Element) children.push(block)
   } else if (isVaporComponent(block)) {
-    if (isAsyncWrapper(block)) {
-      // for unresolved async wrapper, set transition hooks on inner fragment
-      if (!block.type.__asyncResolved) {
-        onFragment && onFragment(block.block! as DynamicFragment)
-      } else {
-        child = resolveTransitionBlock(
-          (block.block! as DynamicFragment).nodes,
-          onFragment,
-        )
-        if (child) {
-          if (child.$key == null) {
-            child.$key = block.$key ?? block.uid
-          }
-          // align with normal component branches so leaving cache can
-          // distinguish different resolved async wrapper types.
-          transitionTypeMap.set(child, block.type)
-        }
-      }
-    } else {
-      // stop searching if encountering nested Transition component
-      if (getComponentName(block.type) === displayName) return undefined
-      child = resolveTransitionBlock(block.block, onFragment)
-      if (child) {
-        if (child.$key == null) {
-          // prefer explicit component key, otherwise fall back to uid.
-          child.$key = block.$key ?? block.uid
-        }
-        transitionTypeMap.set(child, block.type)
-      }
-    }
+    collectComponentTransitionBlocks(block, options, children)
   } else if (isArray(block)) {
-    let hasFound = false
-    for (const c of block) {
-      if (c instanceof Comment) continue
-      const item = resolveTransitionBlock(c, onFragment)
-      if (__DEV__ && hasFound) {
-        // warn more than one non-comment child
-        warn(
-          '<transition> can only be used on a single element or component. ' +
-            'Use <transition-group> for lists.',
-        )
-        break
-      }
-      child = item
-      hasFound = true
-      if (!__DEV__) break
-    }
+    collectArrayTransitionBlocks(block, options, children)
   } else if (isFragment(block)) {
-    if (isInteropEnabled && block.vnode) {
-      child = block
-      const children = getTransitionRawChildren([block.vnode])
-      if (children.length === 1) {
-        transitionTypeMap.set(child, children[0].type)
+    collectFragmentTransitionBlocks(block, options, children)
+  }
+}
+
+function collectComponentTransitionBlocks(
+  block: VaporComponentInstance,
+  options: ResolveTransitionBlocksOptions,
+  children: ResolvedTransitionBlock[],
+): void {
+  if (options.mode === 'group') {
+    // A normal component child can move when parent-driven props update its
+    // root layout without re-running the surrounding v-for fragment.
+    // When the component root is a slot, the TransitionGroup children are the
+    // slotted blocks, so track the slot fragment instead of the component.
+    const isRootSlot = block.block && isSlotFragment(block.block)
+    if (options.onUpdateOwner && !isRootSlot) options.onUpdateOwner(block)
+
+    const start = children.length
+    collectTransitionBlocks(
+      block.block,
+      isRootSlot
+        ? options
+        : {
+            mode: options.mode,
+            onFragment: options.onFragment,
+          },
+      children,
+    )
+    // Tag the resolved children with the component type so the leaving cache
+    // buckets by component (mirroring single mode's inheritSingleComponentKey
+    // and VDOM's vnode.type bucketing) instead of the shared root tag name.
+    // Otherwise a leaving item cached via this group path under its tag name
+    // can't be matched by a re-entering item — which v-for resolves via the
+    // single path under the component type — so earlyRemove misses and two
+    // same-key instances are left in the DOM. Root-slot children belong to the
+    // parent, so they keep their own resolved type.
+    if (!isRootSlot) {
+      for (let i = start; i < children.length; i++) {
+        transitionTypeMap.set(children[i], block.type)
       }
-    } else {
-      // collect fragments for setting transition hooks
-      if (onFragment) onFragment(block)
-      child = resolveTransitionBlock(block.nodes, onFragment)
     }
+    inheritTransitionKey(children, start, block.$key)
+    return
   }
 
-  return child
+  if (isAsyncWrapper(block)) {
+    // for unresolved async wrapper, set transition hooks on inner fragment
+    if (!block.type.__asyncResolved) {
+      if (options.onFragment)
+        options.onFragment(block.block! as DynamicFragment)
+      return
+    }
+
+    const start = children.length
+    collectTransitionBlocks(
+      (block.block! as DynamicFragment).nodes,
+      options,
+      children,
+    )
+    inheritSingleComponentKey(children[start], block)
+    return
+  }
+
+  // stop searching if encountering nested Transition component
+  if (block.type === VaporTransition) return
+
+  const start = children.length
+  collectTransitionBlocks(block.block, options, children)
+  inheritSingleComponentKey(children[start], block)
+}
+
+function collectArrayTransitionBlocks(
+  block: Block[],
+  options: ResolveTransitionBlocksOptions,
+  children: ResolvedTransitionBlock[],
+): void {
+  if (options.mode === 'group') {
+    for (const c of block) {
+      const start = children.length
+      collectTransitionBlocks(c, options, children)
+      if (c instanceof ForBlock) {
+        const count = children.length - start
+        for (let j = start; j < children.length; j++) {
+          children[j].$key =
+            c.key != null && count > 1 ? `${c.key}:${j - start}` : c.key
+        }
+      }
+    }
+    return
+  }
+
+  let hasFound = false
+  for (const c of block) {
+    if (c instanceof Comment) continue
+    const nested: ResolvedTransitionBlock[] = []
+    collectTransitionBlocks(c, options, nested)
+    if (__DEV__ && hasFound) {
+      // warn more than one non-comment child
+      warn(
+        '<transition> can only be used on a single element or component. ' +
+          'Use <transition-group> for lists.',
+      )
+      break
+    }
+    if (nested.length) children.push(nested[0])
+    hasFound = true
+    if (!__DEV__) break
+  }
+}
+
+function collectFragmentTransitionBlocks(
+  block: VaporFragment,
+  options: ResolveTransitionBlocksOptions,
+  children: ResolvedTransitionBlock[],
+): void {
+  if (options.mode === 'group') {
+    if (options.onFragment) options.onFragment(block)
+    if (options.onUpdateOwner) options.onUpdateOwner(block)
+    if (isInteropEnabled && block.vnode) {
+      // vdom component
+      children.push(block)
+    } else {
+      const start = children.length
+      collectTransitionBlocks(block.nodes, options, children)
+      inheritTransitionKey(children, start, block.$key)
+    }
+    return
+  }
+
+  if (isInteropEnabled && block.vnode) {
+    children.push(block)
+    const rawChildren = getTransitionRawChildren([block.vnode])
+    if (rawChildren.length === 1) {
+      transitionTypeMap.set(block, rawChildren[0].type)
+    }
+    return
+  }
+
+  // collect fragments for setting transition hooks
+  if (options.onFragment) options.onFragment(block)
+  collectTransitionBlocks(block.nodes, options, children)
+}
+
+function inheritSingleComponentKey(
+  child: ResolvedTransitionBlock | undefined,
+  block: VaporComponentInstance,
+): void {
+  if (!child) return
+  // Inherit an explicit component key onto the resolved child, but do NOT
+  // fall back to the component uid. An unkeyed child must keep its key
+  // undefined so successive instances of the same component type share the
+  // leaving-cache bucket (which is keyed by resolved type). This matches
+  // VDOM's null-key behavior and lets a re-entering instance early-remove
+  // the previous one that is still leaving. A uid fallback gives every
+  // instance a distinct key, permanently breaking earlyRemove on toggles.
+  if (child.$key == null && block.$key != null) {
+    child.$key = block.$key
+  }
+  transitionTypeMap.set(child, block.type)
+}
+
+function inheritTransitionKey(
+  children: ResolvedTransitionBlock[],
+  start: number,
+  key: any,
+): void {
+  if (key == null || start === children.length) return
+  for (let i = start; i < children.length; i++) {
+    const child = children[i]
+    let record = inheritedTransitionKeyMap.get(child)
+    let baseKey
+    // Match VDOM parentKey + (child.key ?? index) composition, while reusing
+    // the raw base key across resolutions to avoid repeating prefixes.
+    if (record && record.generation === currentTransitionKeyGeneration) {
+      baseKey = child.$key != null ? child.$key : i - start
+    } else {
+      if (!record || !Object.is(child.$key, record.inheritedKey)) {
+        record = {
+          generation: currentTransitionKeyGeneration,
+          rawBaseKey: child.$key != null ? child.$key : i - start,
+          inheritedKey: '',
+        }
+        inheritedTransitionKeyMap.set(child, record)
+      } else {
+        record.generation = currentTransitionKeyGeneration
+      }
+      baseKey = record.rawBaseKey
+    }
+    record.inheritedKey = String(key) + String(baseKey)
+    child.$key = record.inheritedKey
+  }
 }
 
 export function setTransitionHooks(
@@ -528,7 +829,7 @@ export function getVNodeKey(
   return children.length === 1 ? children[0].key : undefined
 }
 
-export function getTransitionElementFromVNode(
+function getTransitionElementFromVNode(
   vnode: VNode | undefined,
 ): Element | undefined {
   if (!vnode) return
@@ -541,6 +842,26 @@ export function getTransitionElementFromVNode(
   const children = getTransitionRawChildren([vnode])
   if (children.length === 1 && children[0] !== vnode) {
     return getTransitionElementFromVNode(children[0])
+  }
+}
+
+export function isValidTransitionBlock(
+  block: Block,
+): block is ResolvedTransitionBlock {
+  return !!(
+    block instanceof Element ||
+    (isInteropEnabled && isFragment(block) && block.vnode)
+  )
+}
+
+export function getTransitionElement(
+  block: ResolvedTransitionBlock,
+): Element | undefined {
+  if (block instanceof Element) return block
+
+  // vdom interop
+  if (isInteropEnabled && isFragment(block) && block.vnode) {
+    return getTransitionElementFromVNode(block.vnode)
   }
 }
 
@@ -582,11 +903,33 @@ function applyPendingVShows(
   }
 
   onBeforeMount(() => {
-    // Flush the deferred initial v-show writes right before mount so the
-    // DOM is still not inserted, but transition hooks are already ready.
-    for (const pending of pendingVShows) {
-      pending.setDisplay()
-    }
+    // Flush the deferred initial v-show display writes before mount so hooks are
+    // ready, then run enter after DOM insertion but before mounted state flips.
+    let enterCbs: (() => void)[] | undefined
+    pendingVShows.forEach(pending => {
+      const enterCb = pending.apply()
+      if (enterCb) {
+        ;(enterCbs ||= []).push(enterCb)
+      }
+    })
     pendingVShows.length = 0
+    if (enterCbs) {
+      const cbs = enterCbs
+      queuePostFlushCb(() => cbs.forEach(cb => cb()), -1)
+    }
   })
+}
+
+// Whether the resolved root is (still) a v-show-persisted element. v-show's
+// setDisplay tags the leaf element with `vShowOriginalDisplay` on its first
+// run, which on branch/slot updates happens during render (before hooks are
+// applied), so it doubles as a "this root is persisted" marker without
+// re-running the mount-only applyPendingVShows derivation.
+function hasVShowMarker(block: Block | undefined): boolean {
+  if (!block) return false
+  if (block instanceof Element) return vShowOriginalDisplay in block
+  if (isVaporComponent(block)) return hasVShowMarker(block.block)
+  if (isArray(block)) return block.length === 1 && hasVShowMarker(block[0])
+  if (isFragment(block)) return hasVShowMarker(block.nodes)
+  return false
 }

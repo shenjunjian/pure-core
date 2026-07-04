@@ -13,6 +13,17 @@ export function render(_ctx) {
 }"
 `;
 
+exports[`static template marker > does not fold unsafe static attr names into template 1`] = `
+"import { setAttr as _setAttr, template as _template } from 'vue';
+const t0 = _template("<div>", 1)
+
+export function render(_ctx) {
+  const n0 = t0()
+  _setAttr(n0, "foo-\\u0001bar", "")
+  return n0
+}"
+`;
+
 exports[`static template marker > does not mark custom element createElement path as static 1`] = `
 "import { createPlainElement as _createPlainElement } from 'vue';
 
@@ -132,7 +143,7 @@ export function render(_ctx) {
   const n0 = _createFor(() => (_ctx.items), (_for_item0) => {
     const n2 = t0()
     return n2
-  }, (item) => (item), 8)
+  }, (item) => (item), 8 /* IS_SINGLE_NODE */)
   return n0
 }"
 `;

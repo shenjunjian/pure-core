@@ -47,13 +47,12 @@ import {
   nextLogicalSibling,
   setCurrentHydrationNode,
 } from './dom/hydration'
+import { ForBlock, ForFragment, type VaporFragment } from './fragment'
 import {
-  ForBlock,
-  ForFragment,
-  type VaporFragment,
   getCurrentSlotEndAnchor,
-  isHydratingSlotFallbackActive,
-} from './fragment'
+  isPendingSlotContent,
+  queuePendingSlotContentAnchor,
+} from './dom/hydrateFragment'
 import {
   type ChildItem,
   insertionAnchor,
@@ -486,7 +485,7 @@ export const createFor = (
       isComment(hydrationStart, ']') &&
       isComment(hydrationStart.previousSibling!, '[')
     const slotEndAnchor = getCurrentSlotEndAnchor()
-    const slotFallbackRange = isHydratingSlotFallbackActive() && slotEndAnchor
+    const slotFallbackRange = isPendingSlotContent() && slotEndAnchor
 
     const reuseBoundaryClose = (close: Node): void => {
       parentAnchor = markHydrationAnchor(close)
@@ -525,10 +524,9 @@ export const createFor = (
         } else if (slotFallbackRange && !isValidBlock(newBlocks)) {
           // Slot fallback can fall through an empty/invalid `v-for`. In that
           // case SSR only rendered the parent slot range, so this `v-for` has no
-          // own `<!--]-->` to reuse. If `hydrationStart` is not the parent slot
-          // end anchor, use `hydrationStart.nextSibling` as the insertion point
-          // so the runtime `<!--for-->` lands immediately after that local SSR
-          // range. Otherwise insert it before the parent slot end anchor.
+          // own `<!--]-->` to reuse. Keep its runtime anchor detached if
+          // fallback wins; if content wins, insert it at the local slot-content
+          // boundary below.
           const anchor =
             // The invalid list still consumed local SSR item ranges.
             currentHydrationNode !== hydrationStart
@@ -547,9 +545,14 @@ export const createFor = (
           ) {
             setCurrentHydrationNode(hydrationStart)
           }
-          queuePostFlushCb(() => {
-            const parentNode = anchor.parentNode
-            if (parentNode) parentNode.insertBefore(parentAnchor, anchor)
+          queuePendingSlotContentAnchor({
+            onContent: () => {
+              queuePostFlushCb(() => {
+                const parentNode = anchor.parentNode
+                if (parentNode) parentNode.insertBefore(parentAnchor, anchor)
+              })
+            },
+            onFallback: () => {},
           })
         } else {
           const close = locateHydrationBoundaryClose(currentHydrationNode!)

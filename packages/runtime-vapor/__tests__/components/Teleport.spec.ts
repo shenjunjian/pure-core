@@ -80,6 +80,49 @@ describe('renderer: VaporTeleport', () => {
       )
     })
 
+    test('deferred disabled teleports preserve later target order when enabled out of order', async () => {
+      const disabled1 = ref(true)
+      const disabled2 = ref(true)
+
+      const { host } = define({
+        setup() {
+          return [
+            createComp(
+              VaporTeleport,
+              {
+                to: () => '#deferred-disabled-target',
+                defer: () => true,
+                disabled: () => disabled1.value,
+              },
+              { default: () => template('<div>one</div>')() },
+            ),
+            createComp(
+              VaporTeleport,
+              {
+                to: () => '#deferred-disabled-target',
+                defer: () => true,
+                disabled: () => disabled2.value,
+              },
+              { default: () => template('<div>two</div>')() },
+            ),
+            template('<div id="deferred-disabled-target"></div>')(),
+          ]
+        },
+      }).render()
+
+      await nextTick()
+      const target = host.querySelector('#deferred-disabled-target')!
+      expect(target.innerHTML).toBe('')
+
+      disabled2.value = false
+      await nextTick()
+      expect(target.innerHTML).toBe('<div>two</div>')
+
+      disabled1.value = false
+      await nextTick()
+      expect(target.innerHTML).toBe('<div>one</div><div>two</div>')
+    })
+
     test.todo('defer mode should work inside suspense', () => {})
 
     test('update before mounted with defer', async () => {
@@ -371,6 +414,7 @@ describe('renderer: VaporTeleport', () => {
           return [n0]
         },
       })
+      await nextTick()
       expect(root.innerHTML).toBe(
         '<!--teleport start--><!--teleport end--><div>root</div>',
       )
@@ -1121,6 +1165,45 @@ function runSharedTests(deferMode: boolean): void {
     expect(target.innerHTML).toBe('<div>one</div><div>two</div>')
   })
 
+  test('multiple disabled teleports preserve target order when enabled out of order', async () => {
+    const target = document.createElement('div')
+    const disabled1 = ref(true)
+    const disabled2 = ref(true)
+
+    define({
+      setup() {
+        return [
+          createComponent(
+            VaporTeleport,
+            {
+              to: () => target,
+              disabled: () => disabled1.value,
+            },
+            { default: () => template('<div>one</div>')() },
+          ),
+          createComponent(
+            VaporTeleport,
+            {
+              to: () => target,
+              disabled: () => disabled2.value,
+            },
+            { default: () => template('<div>two</div>')() },
+          ),
+        ]
+      },
+    }).render()
+
+    expect(target.innerHTML).toBe('')
+
+    disabled2.value = false
+    await nextTick()
+    expect(target.innerHTML).toBe('<div>two</div>')
+
+    disabled1.value = false
+    await nextTick()
+    expect(target.innerHTML).toBe('<div>one</div><div>two</div>')
+  })
+
   test('should work when using template ref as target', async () => {
     const root = document.createElement('div')
     const target = ref<HTMLElement | null>(null)
@@ -1740,6 +1823,33 @@ test('should not duplicate main-view anchors when keyed list reorders teleport r
   expect(countAnchors('end')).toBe(2)
 })
 
+test('should not move target children when keyed list reorders enabled teleport roots', async () => {
+  const target = document.createElement('div')
+  const items = ref([
+    { id: 'one', text: 'one' },
+    { id: 'two', text: 'two' },
+  ])
+
+  define(() =>
+    createFor(
+      () => items.value,
+      item =>
+        createComponent(
+          VaporTeleport,
+          { to: () => target },
+          { default: () => template(item.value.text)() },
+        ),
+      item => item.id,
+    ),
+  ).render()
+
+  const insertSpy = vi.spyOn(target, 'insertBefore')
+  items.value = [items.value[1], items.value[0]]
+  await nextTick()
+
+  expect(insertSpy).not.toHaveBeenCalled()
+})
+
 test('should delay child setup until teleport target becomes available', async () => {
   const version = ref('one')
   const target = ref<any>('#missing-teleport-target')
@@ -1893,6 +2003,52 @@ test('should reapply css vars when teleport root children are replaced', async (
   await nextTick()
 
   const teleported = target.firstElementChild as HTMLElement
+  expect(teleported.tagName).toBe('P')
+  expect(teleported.getAttribute('data-v-owner')).toBeTruthy()
+  expect(teleported.style.getPropertyValue('--color')).toBe('red')
+
+  state.color = 'blue'
+  await nextTick()
+
+  expect(teleported.style.getPropertyValue('--color')).toBe('blue')
+})
+
+test('should reapply css vars when invalid target keeps children in main view', async () => {
+  const state = reactive({ color: 'red' })
+  const disabled = ref(true)
+  const showAlt = ref(false)
+
+  const { host } = define({
+    setup() {
+      useVaporCssVars(() => state)
+      return createComponent(
+        VaporTeleport,
+        {
+          to: () => '#missing-teleport-target',
+          disabled: () => disabled.value,
+        },
+        {
+          default: () =>
+            showAlt.value
+              ? template('<p>alt</p>', 1)()
+              : template('<span>base</span>', 1)(),
+        },
+      )
+    },
+  }).render()
+  await nextTick()
+
+  expect((host.firstElementChild as HTMLElement).tagName).toBe('SPAN')
+
+  disabled.value = false
+  await nextTick()
+  expect('Failed to locate Teleport target').toHaveBeenWarned()
+  expect('Invalid Teleport target').toHaveBeenWarned()
+
+  showAlt.value = true
+  await nextTick()
+
+  const teleported = host.firstElementChild as HTMLElement
   expect(teleported.tagName).toBe('P')
   expect(teleported.getAttribute('data-v-owner')).toBeTruthy()
   expect(teleported.style.getPropertyValue('--color')).toBe('red')

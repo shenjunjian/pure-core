@@ -1,4 +1,132 @@
-# [3.6.0-beta.13](https://github.com/vuejs/core/compare/v3.5.35...v3.6.0-beta.13) (2026-05-28)
+# [3.6.0-beta.17](https://github.com/vuejs/core/compare/v3.6.0-beta.16...v3.6.0-beta.17) (2026-06-24)
+
+
+### Bug Fixes
+
+* **compiler-vapor:** avoid non-stable slots for stable root siblings ([cc2d0c9](https://github.com/vuejs/core/commit/cc2d0c9ca47fa3b3a3895529ab0f0b6291cd5439))
+* **compiler-vapor:** avoid slot-root tracking for slot outlets ([de347ac](https://github.com/vuejs/core/commit/de347ac752a16664506b95d9a7057e1db16e0529))
+* **compiler-vapor:** avoid unsafe repeated expression replacements ([72988d0](https://github.com/vuejs/core/commit/72988d05539e878bdfcfb9501e1313299ddcb7fd))
+* **compiler-vapor:** keep stable slot roots on fast path ([3a9a0ee](https://github.com/vuejs/core/commit/3a9a0ee7eae64290131d0562586b199f92d5e147))
+* **compiler-vapor:** track forwarded slot fallback validity ([d5b4c53](https://github.com/vuejs/core/commit/d5b4c53529c09b2d4b7f200872e8660fc82ac207))
+* **runtime-vapor:** align slot validity for component roots ([b46322a](https://github.com/vuejs/core/commit/b46322a6082578199a4da2b132f3f5dbf9fe936d))
+* **runtime-vapor:** hydrate dynamic native element slots correctly ([#14972](https://github.com/vuejs/core/issues/14972)) ([cf5eefa](https://github.com/vuejs/core/commit/cf5eefa06be8ffdedb24652c3c4df5ae14eed9a6))
+* **runtime-vapor:** pair vdom interop update hooks ([bcaa753](https://github.com/vuejs/core/commit/bcaa753efe8435d1a40e543604d42c23209fc1ef))
+* **runtime-vapor:** pause tracking when invoking function refs ([#14986](https://github.com/vuejs/core/issues/14986)) ([90bd305](https://github.com/vuejs/core/commit/90bd305f6dc68c7e406b228e20563e451d24c87d))
+* **runtime-vapor:** preserve render effect creation order when updating ([#14984](https://github.com/vuejs/core/issues/14984)) ([3f22cc9](https://github.com/vuejs/core/commit/3f22cc9bfaeab880fcac6b4429f4af913096093d))
+* **runtime-vapor:** sync interop slot owner root after child updates ([975dd4d](https://github.com/vuejs/core/commit/975dd4d2247f7264e57fb6152427d5ba66dfb3c6))
+
+
+### Performance Improvements
+
+* **compiler-vapor:** avoid redundant text run slicing ([dd54ec1](https://github.com/vuejs/core/commit/dd54ec1de0cabf71276628d031f59d538700b058))
+* **compiler-vapor:** cache child context analysis ([ab1dfd5](https://github.com/vuejs/core/commit/ab1dfd58a569cd29acfa59fa9377c3a0878f8ac4))
+* **runtime-vapor:** avoid redundant slot content validity checks ([7f47f1e](https://github.com/vuejs/core/commit/7f47f1eb30e03862978844256f13388411d24462))
+
+# [3.6.0-beta.16](https://github.com/vuejs/core/compare/v3.6.0-beta.15...v3.6.0-beta.16) (2026-06-17)
+
+
+### Bug Fixes
+
+* **compiler-vapor:** handle setup-let inline assignment ([0bf86ef](https://github.com/vuejs/core/commit/0bf86ef6f38ab048b9b88c1dfe85de5233c496bb))
+* **compiler-vapor:** ignore v-html children before text transforms ([224e672](https://github.com/vuejs/core/commit/224e672c88219c30d731099377e95fe0223b0857))
+* **compiler-vapor:** keep unsafe attr names out of templates ([780c4ff](https://github.com/vuejs/core/commit/780c4ff42edefdd329e3140b27ec4a41f187bf53))
+* **compiler-vapor:** normalize dynamic modifier arg keys ([d80423d](https://github.com/vuejs/core/commit/d80423ddfd9eb6b84650126a4703d8f6040ce3e6))
+* **compiler-vapor:** quote native v-model modifier keys ([898ce5b](https://github.com/vuejs/core/commit/898ce5b648adc01c071b555acf63da401e0ca8b0))
+* **compiler-vapor:** quote static v-model modifier keys ([eb25a7f](https://github.com/vuejs/core/commit/eb25a7f010dfed5ee679141939f6ea12fa4cd49b))
+* **compiler-vapor:** report slot v-else without adjacent v-if ([1eaacfa](https://github.com/vuejs/core/commit/1eaacfa1e10a23bd002bf4bd2ba3c0efbb2409c9))
+* **compiler-vapor:** return empty blocks for empty output ([2c73a96](https://github.com/vuejs/core/commit/2c73a96e41755293bdf68f51ac5abdc4b9991ca6))
+* **runtime-vapor:** apply dynamic props on mismatch-recreated nodes ([a36f43b](https://github.com/vuejs/core/commit/a36f43bab8536deba75662de30883d1dfd7659e1))
+* **runtime-vapor:** avoid re-cloning static template cache on repeated hydration adoptions ([2d7464c](https://github.com/vuejs/core/commit/2d7464c625661dd8903ea5f3b1cf11110fabe4d2))
+* **runtime-vapor:** bucket transition-group leave by type ([207dce4](https://github.com/vuejs/core/commit/207dce494561ac86664d39fe5c130ae9567e452c))
+* **runtime-vapor:** compare raw keys before transition early removal ([5689b88](https://github.com/vuejs/core/commit/5689b88eceb1aa9aea5b286191acd9d0c64c4f1b))
+* **runtime-vapor:** correct fragment start hydration mismatch warning ([4eb5dca](https://github.com/vuejs/core/commit/4eb5dca191b0168890051aad4582bc3d0c92ac51))
+* **runtime-vapor:** correct tag mismatch detection in hydration ([3daf8f5](https://github.com/vuejs/core/commit/3daf8f5a3648414cf7f1959b596b91b1066daaaf))
+* **runtime-vapor:** fall back to full mount for empty ssr containers ([baa7c59](https://github.com/vuejs/core/commit/baa7c59faf319a819ea6a0ac58a70093dd923e72))
+* **runtime-vapor:** hydrate static text mismatches ([58aeb40](https://github.com/vuejs/core/commit/58aeb40323b2f223d68eb26b6273b9dac1e8452a))
+* **runtime-vapor:** hydrate v-if empty branches with static templates ([0c92f54](https://github.com/vuejs/core/commit/0c92f54befd4cbe228d7ad426dd33b59d709ca49))
+* **runtime-vapor:** keep out-in branch key in sync when leave defers render ([370de63](https://github.com/vuejs/core/commit/370de6391d4d1b2933e9491d86bb61c163bb05d6))
+* **runtime-vapor:** no-op mount for missing selector ([05bf22a](https://github.com/vuejs/core/commit/05bf22aeeb97030ce8d635014dfaf3aeb0773638))
+* **runtime-vapor:** parse dynamic v-bind event options like vdom ([5100a6e](https://github.com/vuejs/core/commit/5100a6ec7e86ebd2dc6b8fa6a1aefe4a782ab497))
+* **runtime-vapor:** re-resolve transition hooks on prop change ([fda5bc4](https://github.com/vuejs/core/commit/fda5bc47f4e9d0ae0c54df07d089792b2c2f229b))
+* **runtime-vapor:** share leaving cache for unkeyed transition child ([254a9c0](https://github.com/vuejs/core/commit/254a9c0ba3ba71ea70ea08d1bfdc63c48d71bc07))
+* **runtime-vapor:** skip nullish dynamic emit sources ([ffd671c](https://github.com/vuejs/core/commit/ffd671c8336032f100da82f7c4fcc134df70bc5f))
+* **runtime-vapor:** stop persisted leaking to non-v-show roots ([a816c9e](https://github.com/vuejs/core/commit/a816c9e6f7bb58558fa2025052e6652704b74ec2))
+* **runtime-vapor:** stringify symbol attribute values ([a63b165](https://github.com/vuejs/core/commit/a63b16575c55c708b981f1f97ce878c7a06353e6))
+* **runtime-vapor:** treat nullish dynamic props as empty ([f53da05](https://github.com/vuejs/core/commit/f53da05b233683cfc001a87b0dc0f0758f2782a2))
+* **runtime-vapor:** unmount apps without dev instance state ([52fda7c](https://github.com/vuejs/core/commit/52fda7c93d959769dd79487114c0f6ba8b3d2d8f))
+
+
+### Performance Improvements
+
+* **vapor:** skip SlotFragment for stable slot fallback ([#14969](https://github.com/vuejs/core/issues/14969)) ([27b0482](https://github.com/vuejs/core/commit/27b048287eaeee9f6d470ede87be3146f5209b03))
+
+# [3.6.0-beta.15](https://github.com/vuejs/core/compare/v3.6.0-beta.14...v3.6.0-beta.15) (2026-06-11)
+
+
+### Bug Fixes
+
+* **compiler-vapor:** align click modifier normalization with vdom ([eaefa71](https://github.com/vuejs/core/commit/eaefa718ba64be052633491fa634de57798d7bf1))
+* **compiler-vapor:** align transition v-if comment handling with vdom ([e337121](https://github.com/vuejs/core/commit/e3371219ecfd9b5edf4a02f582b82cff67162f20))
+* **runtime-vapor:** align invalid teleport target handling with vdom ([e3667e2](https://github.com/vuejs/core/commit/e3667e224e05466143674e2a7418d559f844bba0))
+* **runtime-vapor:** align transition group key inheritance with vdom ([954b045](https://github.com/vuejs/core/commit/954b045ffeea6640c713e9a50483083e46aad92d))
+* **runtime-vapor:** align v-show appear timing with vdom ([bfab54f](https://github.com/vuejs/core/commit/bfab54f6c67686ff2f66088aec1e53c476191e1c))
+* **runtime-vapor:** clear old keyed direct template refs ([368f33d](https://github.com/vuejs/core/commit/368f33dd9ad69ac549a1fc3385ae207dff1ec0cd))
+* **runtime-vapor:** guard interop vnode access ([1997b68](https://github.com/vuejs/core/commit/1997b68bf34380c75b7d33d3abff2b2a4bf047de))
+* **runtime-vapor:** keep inherited transition keys stable ([78477e9](https://github.com/vuejs/core/commit/78477e96453ba1cd696c74765ceca5216b309222))
+* **runtime-vapor:** preserve disabled teleport target order ([741be6e](https://github.com/vuejs/core/commit/741be6eae81cc54268c860e871cef6795378178f))
+* **runtime-vapor:** preserve unique transition keys for multi-root v-for items ([38f8acb](https://github.com/vuejs/core/commit/38f8acbc428a8810e82c19c416bb20f04ffcdbcc))
+* **runtime-vapor:** preserve v-show fragment method arguments ([de6f340](https://github.com/vuejs/core/commit/de6f3404755b958ff34302e43fa4665eec20fb1e))
+* **runtime-vapor:** restore transition group hooks after skipped move ([e229551](https://github.com/vuejs/core/commit/e229551e1114abe49990cacde42addcbfce2cb9a))
+* **runtime-vapor:** skip disabled delegated direct handlers ([#14948](https://github.com/vuejs/core/issues/14948)) ([0135bdb](https://github.com/vuejs/core/commit/0135bdb6aea28b0aacffb42eb48d3869c14f02f6))
+* **runtime-vapor:** track teleport mount location explicitly ([27c66f6](https://github.com/vuejs/core/commit/27c66f63d01e3e5d524c1f4f06d36829c8b7fa29))
+* **runtime-vapor:** update teleport css vars by mount location ([6b5d69f](https://github.com/vuejs/core/commit/6b5d69f9167e78b9383c84940a4f9c298500d76d))
+
+
+### Features
+
+* **compiler-vapor:** support disabling event delegation ([#14924](https://github.com/vuejs/core/issues/14924)) ([3d6f02f](https://github.com/vuejs/core/commit/3d6f02faba34af1c72457e26bc3f7076f870be08))
+
+
+### Performance Improvements
+
+* **runtime-vapor:** avoid moving teleport target children on reorder ([9a07fe2](https://github.com/vuejs/core/commit/9a07fe26a648b0ae24c6a773e26bfd96f257a5fa))
+* **runtime-vapor:** avoid retaining fragment classes in app-only bundles ([fbeec00](https://github.com/vuejs/core/commit/fbeec00ffa16430da17b2304710a8e0aba523e00))
+* **runtime-vapor:** reuse teleport raw props proxy ([bd08cdb](https://github.com/vuejs/core/commit/bd08cdb0fc88add51fb033358d84de4e0f173613))
+
+# [3.6.0-beta.14](https://github.com/vuejs/core/compare/v3.6.0-beta.13...v3.6.0-beta.14) (2026-06-05)
+
+
+### Bug Fixes
+
+* **custom-element:** avoid retaining custom element hooks on shared definitions ([cb1f10b](https://github.com/vuejs/core/commit/cb1f10b5e6f5049e76b51702f9bdc4fcb94d808d))
+* **hmr:** align child component HMR reload with parent rerender ([e251b37](https://github.com/vuejs/core/commit/e251b379c12afd015f9a311b3744ccaf35906384))
+* **hmr:** dedupe HMR parent reloads ([9a7c040](https://github.com/vuejs/core/commit/9a7c040dca1638bbfd4b93a8fd09acfe6792a7bf))
+* **runtime-vapor:** align error component creation in async wrapper ([c8f5fd7](https://github.com/vuejs/core/commit/c8f5fd7eea59f8f83e9f20a994a76f28c07ed473))
+* **runtime-vapor:** avoid fallthrough attrs in multi-root dynamic branches ([#14906](https://github.com/vuejs/core/issues/14906)) ([f247167](https://github.com/vuejs/core/commit/f247167c201de75b85b0ba59d87fae58ad56e416))
+* **runtime-vapor:** avoid fast remove for component v-for ([8f6b772](https://github.com/vuejs/core/commit/8f6b772a9e2c541fc9d70ed245825ce33e95a917))
+* **runtime-vapor:** avoid mutating shared interop bridge ([30b2b99](https://github.com/vuejs/core/commit/30b2b998fdfa11d92f629f630edf6abffe6b4ce3))
+* **runtime-vapor:** pass props and slots to loadingComponent ([6385534](https://github.com/vuejs/core/commit/6385534815eff4dc7929a6f6198e5b4d0619047e))
+* **runtime-vapor:** preserve fallthrough attrs on nested dynamic fragments ([#14904](https://github.com/vuejs/core/issues/14904)) ([58e6d0b](https://github.com/vuejs/core/commit/58e6d0b05c3f4c311e7f1e2452c5df3e275a67ab))
+* **runtime-vapor:** preserve scope id on dynamic root updates ([#14892](https://github.com/vuejs/core/issues/14892)) ([5c8103d](https://github.com/vuejs/core/commit/5c8103db49027a47cfd94c81542fab1798210c30))
+* **runtime-vapor:** preserve setup effects during hmr rerender ([e8fc5d4](https://github.com/vuejs/core/commit/e8fc5d4d936c1f9e344e1e0e00475cf0e0f5df00))
+* **runtime-vapor:** preserve v-once raw prop getter shape ([#14907](https://github.com/vuejs/core/issues/14907)) ([db712e2](https://github.com/vuejs/core/commit/db712e2fc147cc58cc9018226355f33e9e89b133))
+* **runtime-vapor:** render invalid v-for number ranges as empty ([f9ca837](https://github.com/vuejs/core/commit/f9ca837c74ba86b8eccffe6040c8479e88310fc2))
+* **runtime-vapor:** restore hmr context on errors ([cd1a226](https://github.com/vuejs/core/commit/cd1a226b52cf6bafcd0c3a98c561479debed8b55))
+* **runtime-vapor:** skip v-for updated hooks on initial mount ([9691bc5](https://github.com/vuejs/core/commit/9691bc5a8d772ef02ce0096c9254283757b35ce2))
+* **runtime-vapor:** update app instance on root hmr reload ([5179a96](https://github.com/vuejs/core/commit/5179a96bc476aae1ffce5fbd4e5c8c9add2b4798))
+* **runtime-vapor:** update custom element children from reactive props ([a6a3181](https://github.com/vuejs/core/commit/a6a3181c1ef497c128ad2bb3f80c6ef3c19efe20))
+* **runtime-vapor:** update v-for object aliases when reusing blocks ([172a954](https://github.com/vuejs/core/commit/172a954c021f132417c256c9b17452b805f1ab50))
+* **scheduler:** reset job queue length after flush ([#14905](https://github.com/vuejs/core/issues/14905)) ([6b2bf08](https://github.com/vuejs/core/commit/6b2bf08ea67f3d98f6ff061b8334ebb8514a72af)), closes [#14903](https://github.com/vuejs/core/issues/14903)
+* **transition:** avoid move transition for hidden v-show group children ([#14896](https://github.com/vuejs/core/issues/14896)) ([2479652](https://github.com/vuejs/core/commit/247965241bd96a4ab0d1f9ddc1d0a66cb0517683))
+* **vapor:** expose async component alias for SSR runtime ([9f6a215](https://github.com/vuejs/core/commit/9f6a215b8aabccc72036cbe65905cc5ed58776d3))
+* **vFor:** avoid eager evaluation of destructure defaults ([42444be](https://github.com/vuejs/core/commit/42444be6b6aa95e59907cb49b9fd96993df90076))
+
+
+### Performance Improvements
+
+* **runtime-vapor:** cache normalized interop slot wrappers ([3ad548e](https://github.com/vuejs/core/commit/3ad548e0d8b174e2af66655a704c9474e62fbcb5))
+
+# [3.6.0-beta.13](https://github.com/vuejs/core/compare/v3.6.0-beta.12...v3.6.0-beta.13) (2026-05-28)
 
 
 ### Bug Fixes
@@ -76,7 +204,7 @@
 * **runtime-vapor:** detach v-for item scopes ([#14811](https://github.com/vuejs/core/issues/14811)) ([4e77400](https://github.com/vuejs/core/commit/4e774009757859b064c2137edc2f293ddaa378ee))
 * **vapor:** add fast path for static class names ([#14803](https://github.com/vuejs/core/issues/14803)) ([1292bc4](https://github.com/vuejs/core/commit/1292bc491bd87c62a795475f83ad1839dccd5a0f))
 
-# [3.6.0-beta.11](https://github.com/vuejs/core/compare/v3.5.34...v3.6.0-beta.11) (2026-05-07)
+# [3.6.0-beta.11](https://github.com/vuejs/core/compare/v3.6.0-beta.10...v3.6.0-beta.11) (2026-05-07)
 
 
 ### Bug Fixes
@@ -258,7 +386,7 @@
 ### Features
 
 * **vapor:** preserve static keys ([62cb2ce](https://github.com/vuejs/core/commit/62cb2ce8f1b8e26d392a6548f1d3644bcb0204f7))
-# [3.6.0-beta.8](https://github.com/vuejs/core/compare/v3.5.30...v3.6.0-beta.8) (2026-03-16)
+# [3.6.0-beta.8](https://github.com/vuejs/core/compare/v3.6.0-beta.7...v3.6.0-beta.8) (2026-03-16)
 
 
 ### Bug Fixes
@@ -291,7 +419,7 @@
 * **vapor:** infer component multi-root metadata from SFC templates for hydration ([#14530](https://github.com/vuejs/core/issues/14530)) ([c531937](https://github.com/vuejs/core/commit/c531937c5caacb67751b9b2c380d41684b9a6ea8))
 
 
-# [3.6.0-beta.7](https://github.com/vuejs/core/compare/v3.5.29...v3.6.0-beta.7) (2026-02-27)
+# [3.6.0-beta.7](https://github.com/vuejs/core/compare/v3.6.0-beta.6...v3.6.0-beta.7) (2026-02-27)
 
 
 ### Bug Fixes
@@ -346,7 +474,7 @@
 - **vapor:** properly move vapor component / slot ([#14363](https://github.com/vuejs/core/issues/14363)) ([b0c04eb](https://github.com/vuejs/core/commit/b0c04eb6c2d18a36ca46bfef7a33bfb1798760e8))
 - **vapor:** support directives on vapor components in vdom parent ([#14355](https://github.com/vuejs/core/issues/14355)) ([9add6d7](https://github.com/vuejs/core/commit/9add6d7b4f4720e9d9092724d071971708cef47d))
 
-# [3.6.0-beta.4](https://github.com/vuejs/core/compare/v3.5.27...v3.6.0-beta.4) (2026-01-23)
+# [3.6.0-beta.4](https://github.com/vuejs/core/compare/v3.6.0-beta.3...v3.6.0-beta.4) (2026-01-23)
 
 ### Bug Fixes
 
@@ -389,7 +517,7 @@
 - **runtime-vapor:** handle css vars work with empty VaporFragment ([#14268](https://github.com/vuejs/core/issues/14268)) ([8aa3714](https://github.com/vuejs/core/commit/8aa371453054a926e6c226729003dc5a723624a0)), closes [#14266](https://github.com/vuejs/core/issues/14266)
 - **templateRef:** handling template ref on vdom child with insertion state ([#14243](https://github.com/vuejs/core/issues/14243)) ([cc872d6](https://github.com/vuejs/core/commit/cc872d6180836b7ec140d6d2b6e84e2f2f9a4418)), closes [#14242](https://github.com/vuejs/core/issues/14242)
 
-# [3.6.0-beta.1](https://github.com/vuejs/core/compare/v3.5.26...v3.6.0-beta.1) (2025-12-23)
+# [3.6.0-beta.1](https://github.com/vuejs/core/compare/v3.6.0-alpha.7...v3.6.0-beta.1) (2025-12-23)
 
 Vue 3.6 is now entering beta phase as we have completed the intended feature set for Vapor Mode as outlined in the [roadmap](https://github.com/vuejs/core/issues/13687)! Vapor Mode now has feature parity with all stable features in Virtual DOM mode. Suspense is not supported in Vapor-only mode, but you can render Vapor components inside a VDOM Suspense.
 
@@ -543,7 +671,7 @@ Vapor Mode attempts to match VDOM Mode behavior as much as possible, but there c
 - **suspense:** support rendering of Vapor components ([#14157](https://github.com/vuejs/core/issues/14157)) ([0dcc98f](https://github.com/vuejs/core/commit/0dcc98fb3afaca4a1e4a58d01d3dfbc2d9676b5c))
 - **vapor:** implement `v-once` support for slot outlets ([#14141](https://github.com/vuejs/core/issues/14141)) ([498ce69](https://github.com/vuejs/core/commit/498ce69a58fa0c2dfca0881e091a398597846408))
 
-# [3.6.0-alpha.5](https://github.com/vuejs/core/compare/v3.5.25...v3.6.0-alpha.5) (2025-11-25)
+# [3.6.0-alpha.5](https://github.com/vuejs/core/compare/v3.6.0-alpha.4...v3.6.0-alpha.5) (2025-11-25)
 
 ### Bug Fixes
 
@@ -558,7 +686,7 @@ Vapor Mode attempts to match VDOM Mode behavior as much as possible, but there c
 
 - **vapor:** support `v-bind()` in CSS ([#12621](https://github.com/vuejs/core/issues/12621)) ([b9dca57](https://github.com/vuejs/core/commit/b9dca57c205be99d08690ab24d3c5420ec166f85))
 
-# [3.6.0-alpha.4](https://github.com/vuejs/core/compare/v3.5.24...v3.6.0-alpha.4) (2025-11-14)
+# [3.6.0-alpha.4](https://github.com/vuejs/core/compare/v3.6.0-alpha.3...v3.6.0-alpha.4) (2025-11-14)
 
 ### Bug Fixes
 
@@ -579,7 +707,7 @@ Vapor Mode attempts to match VDOM Mode behavior as much as possible, but there c
 - **vapor:** support svg and MathML ([#13703](https://github.com/vuejs/core/issues/13703)) ([f0d0cfd](https://github.com/vuejs/core/commit/f0d0cfd1d48a61ea5f5e094f6546272a758363c9))
 - **vapor:** dom event error handling ([#13769](https://github.com/vuejs/core/issues/13769)) ([d2eebe4](https://github.com/vuejs/core/commit/d2eebe45a87e8af2c19f4e2792d8aff0fb0fff24))
 
-# [3.6.0-alpha.3](https://github.com/vuejs/core/compare/v3.5.23...v3.6.0-alpha.3) (2025-11-06)
+# [3.6.0-alpha.3](https://github.com/vuejs/core/compare/v3.6.0-alpha.2...v3.6.0-alpha.3) (2025-11-06)
 
 ### Bug Fixes
 
