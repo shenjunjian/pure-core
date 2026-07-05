@@ -1,5 +1,5 @@
 import { VaporBlockShape, VaporIfFlags } from '@vue/shared'
-import { insert } from './block.js'
+import { insert, remove } from './block.js'
 import { createComment, createTextNode } from './dom/node.js'
 import {
   insertionAnchor,
@@ -31,9 +31,19 @@ export function createIf(
     const index = flags >> VaporIfFlags.INDEX_SHIFT
     const keyed = index > 0
     const keyBase = keyed ? (index - 1) * 2 : 0
-    frag = __DEV__
-      ? new DynamicFragment('if', keyed)
-      : new DynamicFragment(undefined, keyed)
+    const trackSlotBoundary = !!(flags & VaporIfFlags.SLOT_ROOT)
+    frag = new DynamicFragment(
+      __DEV__ ? 'if' : undefined,
+      keyed,
+      trackSlotBoundary,
+      trackSlotBoundary
+        ? () => {
+            const anchor = frag.anchor
+            const parent = anchor.parentNode
+            if (parent) remove(anchor, parent)
+          }
+        : undefined,
+    )
     renderEffect(() => {
       const ok = condition()
       const render = ok ? b1 : b2

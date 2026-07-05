@@ -1,4 +1,9 @@
-import { isRef, onScopeDispose } from '@vue/reactivity'
+import {
+  isRef,
+  onScopeDispose,
+  pauseTracking,
+  resetTracking,
+} from '@vue/reactivity'
 import {
   EMPTY_OBJ,
   NO,
@@ -21,6 +26,14 @@ import { currentInstance } from '../internal/instance.js'
 import { DynamicFragment, isDynamicFragment, isFragment } from './fragment.js'
 import { getExposed, isVaporComponent } from './component.js'
 import { invalidatePendingRef, refCleanups, unsetRef } from './refCleanup.js'
+import { renderEffect } from './renderEffect.js'
+
+function getTemplateRefUpdateFragment(el) {
+  if (isDynamicFragment(el)) return el
+  if (isVaporComponent(el) && isAsyncWrapper(el)) {
+    return el.block
+  }
+}
 
 function ensureCleanup(el) {
   let cleanupRef = refCleanups.get(el)
@@ -37,35 +50,94 @@ function ensureCleanup(el) {
 
 export function createTemplateRefSetter() {
   const instance = currentInstance
-  const oldRefMap = new WeakMap()
-  const setRefMap = new WeakMap()
+  const stateMap = new WeakMap()
 
   return (el, ref, refFor, refKey) => {
-    if (isDynamicFragment(el) || (isVaporComponent(el) && isAsyncWrapper(el))) {
-      const frag = isDynamicFragment(el) ? el : el.block
-      const doSet = () => {
-        if (isVaporComponent(el) && el.isDeactivated) return
-        oldRefMap.set(
-          el,
-          setRef(instance, el, ref, oldRefMap.get(el), refFor, refKey),
-        )
-      }
-      const prevSet = setRefMap.get(frag)
-      if (prevSet && frag.onUpdated) remove(frag.onUpdated, prevSet)
-      ;(frag.onUpdated || (frag.onUpdated = [])).push(doSet)
-      setRefMap.set(frag, doSet)
+    let state = stateMap.get(el)
+    if (!state) {
+      stateMap.set(el, (state = { ref }))
     }
-
-    const oldRef = setRef(instance, el, ref, oldRefMap.get(el), refFor, refKey)
-    oldRefMap.set(el, oldRef)
-    return oldRef
+    return setTemplateRefWithState(instance, el, state, ref, refFor, refKey)
   }
 }
 
-function setRef(instance, el, ref, oldRef, refFor, refKey) {
+function createSingleTemplateRefSetter() {
+  const instance = currentInstance
+  let state
+
+  return (el, ref, refFor, refKey) => {
+    if (!state) {
+      state = { ref }
+    }
+    return setTemplateRefWithState(instance, el, state, ref, refFor, refKey)
+  }
+}
+
+function setTemplateRefWithState(instance, el, state, ref, refFor, refKey) {
+  state.ref = ref
+  state.refFor = refFor
+  state.refKey = refKey
+
+  const frag = getTemplateRefUpdateFragment(el)
+  if (frag && state.registeredFrag !== frag) {
+    state.registeredFrag = frag
+    ;(frag.onUpdated || (frag.onUpdated = [])).push(() => {
+      if (isVaporComponent(el) && el.isDeactivated) return
+      state.oldRef = setRef(
+        instance,
+        el,
+        state.ref,
+        state.oldRef,
+        state.refFor,
+        state.refKey,
+        state.oldRefKey,
+      )
+      state.oldRefKey = state.oldRef != null ? state.refKey : undefined
+    })
+  }
+
+  const oldRef = setRef(
+    instance,
+    el,
+    ref,
+    state.oldRef,
+    refFor,
+    refKey,
+    state.oldRefKey,
+  )
+  state.oldRef = oldRef
+  state.oldRefKey = oldRef != null ? refKey : undefined
+  return oldRef
+}
+
+export function setStaticTemplateRef(el, ref, refFor, refKey) {
+  const instance = currentInstance
+  const oldRef = setRef(instance, el, ref, undefined, refFor, refKey)
+  const frag = getTemplateRefUpdateFragment(el)
+  if (frag) {
+    ;(frag.onUpdated || (frag.onUpdated = [])).push(() => {
+      if (isVaporComponent(el) && el.isDeactivated) return
+      setRef(instance, el, ref, oldRef, refFor, refKey)
+    })
+  }
+  return oldRef
+}
+
+export function setTemplateRefBinding(
+  el,
+  getter,
+  setter = createSingleTemplateRefSetter(),
+  refFor,
+  refKey,
+) {
+  renderEffect(() => setter(el, getter(), refFor, refKey))
+}
+
+function setRef(instance, el, ref, oldRef, refFor, refKey, oldRefKey) {
   if (!instance || instance.isUnmounted) return
 
   const setupState = __DEV__ ? instance.setupState || {} : null
+  const refValue = getRefValue(el)
 
   const refs =
     instance.refs === EMPTY_OBJ ? (instance.refs = {}) : instance.refs
@@ -92,19 +164,14 @@ function setRef(instance, el, ref, oldRef, refFor, refKey) {
         setupState[oldRef] = null
       }
     } else if (isRef(oldRef)) {
-      if (canSetRef(oldRef)) oldRef.value = null
+      if (canSetRef(oldRef, oldRefKey)) oldRef.value = null
+      if (oldRefKey) refs[oldRefKey] = null
     } else if (isFunction(oldRef) && isDynamicFragment(el)) {
-      callWithErrorHandling(oldRef, instance, ErrorCodes.FUNCTION_REF, [
-        null,
-        refs,
-      ])
+      callFunctionRef(oldRef, instance, null, refs)
     }
   } else if (oldRef != null && isDynamicFragment(el)) {
     if (isFunction(oldRef)) {
-      callWithErrorHandling(oldRef, instance, ErrorCodes.FUNCTION_REF, [
-        null,
-        refs,
-      ])
+      callFunctionRef(oldRef, instance, null, refs)
     } else if (refFor) {
       unsetRef(el)
     }
@@ -114,13 +181,10 @@ function setRef(instance, el, ref, oldRef, refFor, refKey) {
 
   if (isFunction(ref)) {
     const invokeRefSetter = value => {
-      callWithErrorHandling(ref, instance, ErrorCodes.FUNCTION_REF, [
-        value,
-        refs,
-      ])
+      callFunctionRef(ref, instance, value, refs)
     }
 
-    invokeRefSetter(getRefValue(el))
+    invokeRefSetter(refValue)
     ensureCleanup(el).fn = () => invokeRefSetter(null)
   } else {
     const _isString = isString(ref)
@@ -130,7 +194,6 @@ function setRef(instance, el, ref, oldRef, refFor, refKey) {
     if (_isString || _isRef) {
       const doSet = () => {
         if (refFor) {
-          const refValue = getRefValue(el)
           if (refValue == null) return
 
           existing = _isString
@@ -157,13 +220,11 @@ function setRef(instance, el, ref, oldRef, refFor, refKey) {
             existing.push(refValue)
           }
         } else if (_isString) {
-          const refValue = getRefValue(el)
           refs[ref] = refValue
           if (__DEV__ && canSetSetupRef(ref)) {
             setupState[ref] = refValue
           }
         } else if (_isRef) {
-          const refValue = getRefValue(el)
           if (canSetRef(ref, refKey)) ref.value = refValue
           if (refKey) refs[refKey] = refValue
         } else if (__DEV__) {
@@ -174,7 +235,7 @@ function setRef(instance, el, ref, oldRef, refFor, refKey) {
       cleanup.fn = () => {
         if (refFor) {
           if (isArray(existing)) {
-            remove(existing, getRefValue(el))
+            remove(existing, refValue)
           }
         } else if (_isString) {
           refs[ref] = null
@@ -188,7 +249,6 @@ function setRef(instance, el, ref, oldRef, refFor, refKey) {
       }
 
       invalidatePendingRef(el)
-      const refValue = getRefValue(el)
       if (refValue != null) {
         const job = () => {
           doSet()
@@ -204,6 +264,15 @@ function setRef(instance, el, ref, oldRef, refFor, refKey) {
     }
   }
   return ref
+}
+
+function callFunctionRef(ref, instance, value, refs) {
+  pauseTracking()
+  try {
+    callWithErrorHandling(ref, instance, ErrorCodes.FUNCTION_REF, [value, refs])
+  } finally {
+    resetTracking()
+  }
 }
 
 function getRefValue(el) {

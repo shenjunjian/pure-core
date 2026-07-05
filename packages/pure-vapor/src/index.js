@@ -191,7 +191,11 @@ export {
   getDefaultValue,
 } from './vapor/apiCreateFor.js'
 
-export { createTemplateRefSetter } from './vapor/apiTemplateRef.js'
+export {
+  createTemplateRefSetter,
+  setStaticTemplateRef,
+  setTemplateRefBinding,
+} from './vapor/apiTemplateRef.js'
 export { useVaporCssVars } from './vapor/helpers/useCssVars.js'
 export { setBlockKey } from './vapor/helpers/setKey.js'
 export { createDynamicComponent } from './vapor/apiCreateDynamicComponent.js'

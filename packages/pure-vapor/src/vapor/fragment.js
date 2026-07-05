@@ -8,7 +8,7 @@ import {
 } from './keepAlive.js'
 import { setBlockKey } from './helpers/setKey.js'
 import { createComment, createTextNode } from './dom/node.js'
-import { insert, remove, isValidBlock } from './block.js'
+import { insert, remove, isValidSlot } from './block.js'
 import {
   applyTransitionHooks,
   deferBranchUpdateDuringLeave,
@@ -17,15 +17,26 @@ import {
   removeBranchWithLeave,
 } from './transition.js'
 import { currentInstance, setCurrentInstance } from '../internal/instance.js'
-import { renderEffect } from './renderEffect.js'
 import { currentSlotOwner, setCurrentSlotOwner } from './componentSlots.js'
 import { isVaporComponent } from './component.js'
+import {
+  currentSlotBoundary,
+  setCurrentSlotBoundary,
+  trackSlotBoundaryDirtying,
+  withSlotBoundary,
+} from './slotBoundary.js'
+import {
+  disposeSlotResolution,
+  markSlotResolutionDirty,
+  recheckSlotResolution,
+} from './slotFragment.js'
 
 export class VaporFragment {
   constructor(nodes) {
     this.nodes = nodes
     this.renderInstance = currentInstance
     this.slotOwner = currentSlotOwner
+    this.slotBoundary = currentSlotBoundary
     if (isKeepAliveEnabled) {
       this.keepAliveCtx = currentKeepAliveCtx
     }
@@ -34,6 +45,7 @@ export class VaporFragment {
   runWithRenderCtx(fn, scope) {
     const prevInstance = setCurrentInstance(this.renderInstance, scope)
     const prevSlotOwner = setCurrentSlotOwner(this.slotOwner)
+    const prevBoundary = setCurrentSlotBoundary(this.slotBoundary)
     let prevKeepAliveCtx = null
     if (isKeepAliveEnabled) {
       prevKeepAliveCtx = setCurrentKeepAliveCtx(this.keepAliveCtx || null)
@@ -44,6 +56,7 @@ export class VaporFragment {
       if (isKeepAliveEnabled) {
         setCurrentKeepAliveCtx(prevKeepAliveCtx)
       }
+      setCurrentSlotBoundary(prevBoundary)
       setCurrentSlotOwner(prevSlotOwner)
       setCurrentInstance(...prevInstance)
     }
@@ -51,8 +64,9 @@ export class VaporFragment {
 }
 
 export class ForFragment extends VaporFragment {
-  constructor(nodes) {
+  constructor(nodes, trackSlotBoundary = false, onInvalid) {
     super(nodes)
+    if (trackSlotBoundary) trackSlotBoundaryDirtying(this, onInvalid)
   }
 
   onReset(fn) {
@@ -72,7 +86,12 @@ export class ForBlock extends VaporFragment {
 }
 
 export class DynamicFragment extends VaporFragment {
-  constructor(anchorLabel, keyed = false) {
+  constructor(
+    anchorLabel,
+    keyed = false,
+    trackSlotBoundary = false,
+    onInvalid,
+  ) {
     super([])
     this.keyed = keyed
     this.anchor =
@@ -85,6 +104,11 @@ export class DynamicFragment extends VaporFragment {
     ) {
       this.inTransition = true
     }
+    if (trackSlotBoundary) trackSlotBoundaryDirtying(this, onInvalid)
+  }
+
+  getBranchParent() {
+    return this.anchor.parentNode
   }
 
   update(render, key = render, noScope = false) {
@@ -111,7 +135,7 @@ export class DynamicFragment extends VaporFragment {
 
     const instance = currentInstance
     const prevSub = setActiveSub()
-    const parent = this.anchor.parentNode
+    const parent = this.getBranchParent()
 
     if (wasMounted) {
       if (this.scope) {
@@ -228,6 +252,125 @@ export class DynamicFragment extends VaporFragment {
   }
 }
 
+export class SlotFragment extends DynamicFragment {
+  constructor(notifyParentBoundary = false) {
+    super(__DEV__ ? 'slot' : undefined, false, false)
+    this.isSlot = true
+    this.disposed = false
+    this.forwarded = false
+    this.activeFallback = null
+    this.pendingRecheck = false
+    this.pendingRecheckForce = false
+    this.isRenderingFallback = false
+    this.onContentInvalid = []
+    this.content = []
+    this.isUpdating = false
+    this.notifyParentBoundary = notifyParentBoundary
+    this.insert = (parent, anchor) => this.insertSlot(parent, anchor)
+    this.remove = parent => this.removeSlot(parent)
+  }
+
+  get boundary() {
+    if (!this.ownBoundary) {
+      const owner = this
+      this.ownBoundary = {
+        get parent() {
+          return owner.slotBoundary
+        },
+        getFallback: () => owner.localFallback,
+        run: (fn, scope) => owner.runWithRenderCtx(fn, scope),
+        markDirty: force => markSlotResolutionDirty(owner, force),
+        onContentInvalid: owner.onContentInvalid,
+      }
+    }
+    return this.ownBoundary
+  }
+
+  insertSlot(parent, anchor) {
+    this.disposed = false
+    insert(this.nodes, parent, anchor)
+  }
+
+  removeSlot(parent) {
+    this.disposed = true
+    const nodes = this.nodes
+    remove(nodes, parent)
+    if (this.activeFallback === nodes) {
+      this.activeFallback = null
+    }
+    this.onContentInvalid.length = 0
+    disposeSlotResolution(this)
+  }
+
+  getBranchParent() {
+    return this.activeFallback ? null : super.getBranchParent()
+  }
+
+  updateContent(render, key) {
+    if (key !== this.current) {
+      this.onContentInvalid.length = 0
+    }
+    this.nodes = this.content
+    this.update(render, key)
+    this.content = this.nodes
+  }
+
+  updateSlot(render, fallback, key = render || fallback) {
+    const prevLocalFallback = this.localFallback
+    this.localFallback = fallback
+    const boundary = this.boundary
+    const slotRender = render
+      ? () => withSlotBoundary(boundary, render)
+      : () => []
+    this.isUpdating = true
+    this.pendingRecheck = false
+
+    try {
+      const shouldForce = prevLocalFallback !== fallback
+      this.updateContent(slotRender, key)
+      recheckSlotResolution(this, shouldForce || this.pendingRecheckForce)
+    } finally {
+      this.pendingRecheck = false
+      this.pendingRecheckForce = false
+      this.isUpdating = false
+    }
+  }
+
+  getContent() {
+    return this.content
+  }
+
+  getParentNode() {
+    return this.anchor ? this.anchor.parentNode : null
+  }
+
+  getAnchor() {
+    return this.anchor || null
+  }
+
+  isBusy() {
+    return this.isUpdating
+  }
+
+  isDisposed() {
+    return this.disposed
+  }
+
+  isContentValid() {
+    return isValidSlot(this.content)
+  }
+
+  syncNodes() {
+    this.nodes = this.activeFallback || this.content
+  }
+
+  notifyExposedValidityChange() {
+    if (this.notifyParentBoundary && this.slotBoundary) {
+      this.slotBoundary.markDirty()
+    }
+  }
+}
+
 export function isFragment(val) {
   return val instanceof VaporFragment
 }
@@ -240,505 +383,4 @@ export function isSlotFragment(val) {
   return isDynamicFragment(val) && !!val.isSlot
 }
 
-// ---------------------------------------------------------------------------
-// Slot fallback (non-hydration)
-// ---------------------------------------------------------------------------
-
-let currentSlotBoundary = null
-
-export function getCurrentSlotBoundary() {
-  return currentSlotBoundary
-}
-
-export function setCurrentSlotBoundary(b) {
-  const prev = currentSlotBoundary
-  currentSlotBoundary = b
-  return prev
-}
-
-export function withOwnedSlotBoundary(boundary, fn) {
-  const prev = setCurrentSlotBoundary(boundary)
-  try {
-    return fn()
-  } finally {
-    setCurrentSlotBoundary(prev)
-  }
-}
-
-function getRedirectedBoundary(boundary) {
-  if (boundary.redirected) {
-    return boundary.redirected
-  }
-  return (boundary.redirected = {
-    get parent() {
-      return boundary.parent
-    },
-    getFallback: () => undefined,
-    run: (fn, scope) => boundary.run(fn, scope),
-    markDirty: () => boundary.markDirty(),
-  })
-}
-
-function walkSlotFallbackBlock(block, node, fragment) {
-  if (block instanceof Node) {
-    return node(block)
-  }
-
-  if (isVaporComponent(block)) {
-    return walkSlotFallbackBlock(block.block, node, fragment)
-  }
-
-  if (isArray(block)) {
-    for (let i = 0; i < block.length; i++) {
-      if (walkSlotFallbackBlock(block[i], node, fragment)) {
-        return true
-      }
-    }
-    return false
-  }
-
-  return fragment(block, block => walkSlotFallbackBlock(block, node, fragment))
-}
-
-export function resolveSlotFallbackCarrierOwner(block) {
-  let owner = null
-  walkSlotFallbackBlock(
-    block,
-    () => false,
-    block => {
-      owner = block
-      return true
-    },
-  )
-  return owner
-}
-
-function findFirstSlotFallbackCarrierNode(block) {
-  let node = null
-  walkSlotFallbackBlock(
-    block,
-    value => {
-      node = value
-      return true
-    },
-    (block, walk) => {
-      if (walk(block.nodes)) {
-        return true
-      }
-      if (block.anchor) {
-        node = block.anchor
-        return true
-      }
-      return false
-    },
-  )
-  return node
-}
-
-function collectBlockNodes(block, nodes, includeComments) {
-  walkSlotFallbackBlock(
-    block,
-    block => {
-      if (includeComments || !(block instanceof Comment)) {
-        nodes.push(block)
-      }
-      return false
-    },
-    block => {
-      collectBlockNodes(block.nodes, nodes, true)
-      if (block.anchor) {
-        nodes.push(block.anchor)
-      }
-      return false
-    },
-  )
-  return nodes
-}
-
-export function mutateSlotFallbackCarrier(block, apply) {
-  walkSlotFallbackBlock(
-    block,
-    block => {
-      if (!(block instanceof Comment)) {
-        apply(block)
-      }
-      return false
-    },
-    block => {
-      apply(block)
-      return false
-    },
-  )
-}
-
-function hasSlotFallback(boundary) {
-  while (boundary) {
-    if (boundary.getFallback()) {
-      return true
-    }
-    boundary = boundary.parent
-  }
-  return false
-}
-
-function renderSlotFallbackBlock(boundary, scope, args) {
-  if (!boundary) {
-    return [[], false]
-  }
-
-  const localFallback = boundary.getFallback()
-  if (!localFallback) {
-    return renderSlotFallbackBlock(boundary.parent, scope, args)
-  }
-
-  const renderFallback = () =>
-    withOwnedSlotBoundary(getRedirectedBoundary(boundary), () =>
-      localFallback(...args),
-    )
-  const local = boundary.run(
-    () => (scope ? scope.run(renderFallback) : renderFallback()) || [],
-    scope,
-  )
-  if (isValidBlock(local)) {
-    return [local, true]
-  }
-
-  const inherited = renderSlotFallbackBlock(boundary.parent, scope, args)[0]
-  return [
-    resolveSlotFallbackCarrierOwner(local) ? [inherited, local] : inherited,
-    true,
-  ]
-}
-
-function renderSlotFallback(boundary, scope, ...args) {
-  const result = renderSlotFallbackBlock(boundary || null, scope, args)
-  return result[1] ? result[0] : undefined
-}
-
-function getSlotEffectiveOutput(outlet) {
-  return outlet.activeFallback || outlet.getContent()
-}
-
-function isSlotFallbackContentValid(outlet) {
-  return outlet.isContentValid
-    ? outlet.isContentValid()
-    : isValidBlock(outlet.getContent())
-}
-
-export function markSlotFallbackDirty(outlet) {
-  if (outlet.isDisposed && outlet.isDisposed()) {
-    return
-  }
-  if (outlet.isRenderingFallback) {
-    outlet.pendingRecheck = true
-    return
-  }
-  if (outlet.isBusy && outlet.isBusy()) {
-    outlet.pendingRecheck = true
-    return
-  }
-  recheckSlotFallback(outlet, true)
-}
-
-function clearSlotFallback(outlet) {
-  if (outlet.activeFallback) {
-    const parentNode = outlet.getParentNode()
-    if (parentNode) {
-      remove(outlet.activeFallback, parentNode)
-    }
-    outlet.activeFallback = null
-  }
-  if (outlet.fallbackScope) {
-    outlet.fallbackScope.stop()
-    outlet.fallbackScope = undefined
-  }
-}
-
-function renderSlotFallbackForOutlet(outlet) {
-  const scope = new EffectScope()
-  let renderedFallback
-  outlet.isRenderingFallback = true
-  try {
-    renderedFallback = renderSlotFallback(outlet.boundary, scope) || undefined
-  } catch (err) {
-    scope.stop()
-    throw err
-  } finally {
-    outlet.isRenderingFallback = false
-  }
-
-  if (!renderedFallback) {
-    scope.stop()
-    return { found: false }
-  }
-
-  return {
-    found: true,
-    block: renderedFallback,
-    scope,
-  }
-}
-
-function syncSlotFallbackOrder(outlet, block) {
-  if (!isFragment(block) || !isArray(block.nodes) || block.nodes.length < 2) {
-    return
-  }
-
-  const carrierNodes = collectBlockNodes(outlet.getContent(), [], true)
-  const fallbackNodes = collectBlockNodes(block, [], true)
-  const lastNode = fallbackNodes[fallbackNodes.length - 1]
-  if (!carrierNodes.length || !lastNode) {
-    return
-  }
-
-  const parentNode = carrierNodes[0].parentNode
-  if (!parentNode || lastNode.parentNode !== parentNode) {
-    return
-  }
-
-  let inOrder = true
-  let nextNode = lastNode.nextSibling
-  for (let i = 0; i < carrierNodes.length; i++) {
-    const carrierNode = carrierNodes[i]
-    if (carrierNode.parentNode !== parentNode) {
-      return
-    }
-    if (carrierNode !== nextNode) {
-      inOrder = false
-      break
-    }
-    nextNode = carrierNode.nextSibling
-  }
-
-  if (inOrder) {
-    return
-  }
-
-  let anchor = lastNode.nextSibling
-  for (let i = carrierNodes.length - 1; i >= 0; i--) {
-    const carrierNode = carrierNodes[i]
-    parentNode.insertBefore(carrierNode, anchor)
-    anchor = carrierNode
-  }
-}
-
-function ensureSlotFallbackOrderHook(outlet, block) {
-  if (!isFragment(block)) {
-    return
-  }
-
-  if (block.hasSlotFallbackOrderHook) {
-    return
-  }
-
-  ;(block.onUpdated || (block.onUpdated = [])).push(() =>
-    syncSlotFallbackOrder(outlet, block),
-  )
-  block.hasSlotFallbackOrderHook = true
-}
-
-function insertActiveSlotFallback(outlet) {
-  if (!outlet.activeFallback) {
-    return
-  }
-  const parentNode = outlet.getParentNode()
-  if (!parentNode) {
-    return
-  }
-  const carrierAnchor = findFirstSlotFallbackCarrierNode(outlet.getContent())
-  insert(
-    outlet.activeFallback,
-    parentNode,
-    carrierAnchor && carrierAnchor.parentNode === parentNode
-      ? carrierAnchor
-      : outlet.getAnchor(),
-  )
-}
-
-function commitSlotFallback(outlet, block, scope) {
-  outlet.activeFallback = block
-  outlet.fallbackScope = scope
-  ensureSlotFallbackOrderHook(outlet, block)
-  insertActiveSlotFallback(outlet)
-}
-
-function disposeSlotFallback(outlet) {
-  clearSlotFallback(outlet)
-  outlet.pendingRecheck = false
-  outlet.lastEffectiveValid = undefined
-}
-
-function recheckSlotFallback(outlet, force) {
-  if (outlet.isRenderingFallback) {
-    outlet.pendingRecheck = true
-    return
-  }
-
-  const prevValid =
-    outlet.lastEffectiveValid === undefined
-      ? outlet.activeFallback
-        ? isValidBlock(outlet.activeFallback)
-        : isSlotFallbackContentValid(outlet)
-      : outlet.lastEffectiveValid
-  const contentValid = isSlotFallbackContentValid(outlet)
-
-  if (contentValid) {
-    clearSlotFallback(outlet)
-  } else {
-    if (force) {
-      clearSlotFallback(outlet)
-    }
-    if (outlet.activeFallback) {
-      insertActiveSlotFallback(outlet)
-    } else {
-      const result = renderSlotFallbackForOutlet(outlet)
-      if (result.found) {
-        commitSlotFallback(outlet, result.block, result.scope)
-        if (
-          outlet.pendingRecheck &&
-          outlet.rerunRecheckAfterFallbackRender !== false
-        ) {
-          outlet.pendingRecheck = false
-          recheckSlotFallback(outlet, true)
-        }
-      } else {
-        clearSlotFallback(outlet)
-      }
-    }
-  }
-
-  const nextValid = outlet.activeFallback
-    ? isValidBlock(outlet.activeFallback)
-    : isSlotFallbackContentValid(outlet)
-  if (outlet.syncEffectiveOutput) {
-    outlet.syncEffectiveOutput()
-  }
-  outlet.lastEffectiveValid = nextValid
-  if (prevValid !== nextValid) {
-    outlet.notifyFallbackValidityChange()
-  }
-}
-
-export class SlotFragment extends DynamicFragment {
-  constructor() {
-    super(__DEV__ ? 'slot' : undefined, false)
-    this.isSlot = true
-    this.disposed = false
-    this.forwarded = false
-    this.parentSlotBoundary = getCurrentSlotBoundary()
-    this.activeFallback = null
-    this.pendingRecheck = false
-    this.isRenderingFallback = false
-    this.rerunRecheckAfterFallbackRender = false
-    this.insert = (parent, anchor) => this.insertSlot(parent, anchor)
-    this.remove = parent => this.removeSlot(parent)
-  }
-
-  ensureSlotFallbackBoundary() {
-    if (this._slotFallbackBoundary) {
-      return this._slotFallbackBoundary
-    }
-    const owner = this
-    return (this._slotFallbackBoundary = {
-      get parent() {
-        return owner.parentSlotBoundary
-      },
-      getFallback: () => owner.localFallback,
-      run: (fn, scope) => owner.runWithRenderCtx(fn, scope),
-      markDirty: () => markSlotFallbackDirty(owner),
-    })
-  }
-
-  get fallbackBlock() {
-    return this.activeFallback
-  }
-
-  get boundary() {
-    return this.slotFallbackBoundary
-  }
-
-  get slotFallbackBoundary() {
-    return this.ensureSlotFallbackBoundary()
-  }
-
-  getEffectiveOutput() {
-    return getSlotEffectiveOutput(this)
-  }
-
-  insertSlot(parent, anchor) {
-    this.disposed = false
-    if (this.fallbackBlock) {
-      insert(this.fallbackBlock, parent, anchor)
-      mutateSlotFallbackCarrier(this.nodes, block =>
-        insert(block, parent, anchor),
-      )
-      return
-    }
-    insert(this.nodes, parent, anchor)
-  }
-
-  removeSlot(parent) {
-    this.disposed = true
-    if (this.fallbackBlock) {
-      mutateSlotFallbackCarrier(this.nodes, block => remove(block, parent))
-    } else {
-      remove(this.nodes, parent)
-    }
-    disposeSlotFallback(this)
-  }
-
-  updateSlot(render, fallback, key) {
-    const prevLocalFallback = this.localFallback
-    this.localFallback = fallback
-    const fallbackChanged = prevLocalFallback !== fallback
-    const fastSlotKey = key === undefined ? render : key
-
-    if (!fallback && !this.parentSlotBoundary && !this._slotFallbackBoundary) {
-      this.update(render, fastSlotKey)
-      return
-    }
-
-    const boundary = this.slotFallbackBoundary
-    const slotRender = render
-      ? () => withOwnedSlotBoundary(boundary, render)
-      : () => []
-    const slotKey = key === undefined ? slotRender : key
-    this.isUpdatingSlot = true
-    this.pendingRecheck = false
-
-    try {
-      const shouldForce = fallbackChanged
-      this.update(slotRender, slotKey)
-      recheckSlotFallback(this, shouldForce)
-    } finally {
-      this.pendingRecheck = false
-      this.isUpdatingSlot = false
-    }
-  }
-
-  getContent() {
-    return this.nodes
-  }
-
-  getParentNode() {
-    return this.anchor ? this.anchor.parentNode : null
-  }
-
-  getAnchor() {
-    return this.anchor || null
-  }
-
-  isBusy() {
-    return this.isUpdatingSlot
-  }
-
-  isDisposed() {
-    return this.disposed
-  }
-
-  notifyFallbackValidityChange() {
-    if (this.parentSlotBoundary) {
-      this.parentSlotBoundary.markDirty()
-    }
-  }
-}
+export { withSlotBoundary, currentSlotBoundary, setCurrentSlotBoundary }

@@ -79,6 +79,45 @@ function stabilizeDynamicSourceValue(oldValue, value) {
   return oldValue
 }
 
+export function snapshotRawProps(rawProps) {
+  const snapshot = Object.create(null)
+  for (const key in rawProps) {
+    if (key !== '$') {
+      const value = resolveSource(rawProps[key])
+      snapshot[key] = () => value
+    }
+  }
+
+  const dynamicSources = rawProps.$
+  if (dynamicSources) {
+    const snapshotSources = []
+    for (let i = 0; i < dynamicSources.length; i++) {
+      const source = dynamicSources[i]
+      const value = Object.create(null)
+      if (isFunction(source)) {
+        const resolved = resolveFunctionSource(source)
+        for (const key in resolved) {
+          value[key] = resolved[key]
+        }
+        snapshotSources[i] = () => value
+      } else {
+        for (const key in source) {
+          const resolved = resolveSource(source[key])
+          value[key] = () => resolved
+        }
+        snapshotSources[i] = value
+      }
+    }
+    const symbols = Object.getOwnPropertySymbols(dynamicSources)
+    for (let i = 0; i < symbols.length; i++) {
+      snapshotSources[symbols[i]] = dynamicSources[symbols[i]]
+    }
+    snapshot.$ = snapshotSources
+  }
+
+  return snapshot
+}
+
 export function getPropsProxyHandlers(comp, once) {
   if (comp.__propsHandlers) {
     return comp.__propsHandlers

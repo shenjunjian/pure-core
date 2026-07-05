@@ -18,6 +18,8 @@ const REQUIRED_EXPORTS = [
   'setText',
   'setProp',
   'createComponent',
+  'setStaticTemplateRef',
+  'setTemplateRefBinding',
   'provide',
   'inject',
   'getCurrentInstance',
