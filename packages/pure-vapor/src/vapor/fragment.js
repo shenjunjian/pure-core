@@ -9,6 +9,13 @@ import {
 import { setBlockKey } from './helpers/setKey.js'
 import { createComment, createTextNode } from './dom/node.js'
 import { insert, remove, isValidBlock } from './block.js'
+import {
+  applyTransitionHooks,
+  deferBranchUpdateDuringLeave,
+  isTransitionEnabled,
+  isVaporTransition,
+  removeBranchWithLeave,
+} from './transition.js'
 import { currentInstance, setCurrentInstance } from '../internal/instance.js'
 import { renderEffect } from './renderEffect.js'
 import { currentSlotOwner, setCurrentSlotOwner } from './componentSlots.js'
@@ -71,10 +78,34 @@ export class DynamicFragment extends VaporFragment {
     this.anchor =
       __DEV__ && anchorLabel ? createComment(anchorLabel) : createTextNode()
     if (__DEV__) this.anchorLabel = anchorLabel
+    if (
+      isTransitionEnabled &&
+      currentInstance &&
+      isVaporTransition(currentInstance.type)
+    ) {
+      this.inTransition = true
+    }
   }
 
-  update(render, key = render) {
+  update(render, key = render, noScope = false) {
     if (key === this.current) {
+      return
+    }
+
+    const transition = isTransitionEnabled ? this.$transition : undefined
+    const wasMounted = this.current !== undefined
+    if (wasMounted) {
+      const onBeforeUpdate = this.onBeforeUpdate
+      if (onBeforeUpdate) {
+        for (let i = 0; i < onBeforeUpdate.length; i++) {
+          onBeforeUpdate[i]()
+        }
+      }
+    }
+    if (
+      transition &&
+      deferBranchUpdateDuringLeave(this, render, key, noScope)
+    ) {
       return
     }
 
@@ -82,59 +113,93 @@ export class DynamicFragment extends VaporFragment {
     const prevSub = setActiveSub()
     const parent = this.anchor.parentNode
 
-    if (this.scope) {
-      if (isKeepAliveEnabled) {
-        let retainScope = false
-        const keepAliveCtx = this.keepAliveCtx
-        if (keepAliveCtx) {
-          const cacheKey = this.keyed
-            ? withCurrentCacheKey(this.current, () =>
-                keepAliveCtx.processShapeFlag(this.nodes),
-              )
-            : keepAliveCtx.processShapeFlag(this.nodes)
-          if (cacheKey !== false) {
-            keepAliveCtx.cacheScope(cacheKey, this.current, this.scope)
-            retainScope = true
+    if (wasMounted) {
+      if (this.scope) {
+        if (isKeepAliveEnabled) {
+          let retainScope = false
+          const keepAliveCtx = this.keepAliveCtx
+          if (keepAliveCtx) {
+            const cacheKey = this.keyed
+              ? withCurrentCacheKey(this.current, () =>
+                  keepAliveCtx.processShapeFlag(this.nodes),
+                )
+              : keepAliveCtx.processShapeFlag(this.nodes)
+            if (cacheKey !== false) {
+              keepAliveCtx.cacheScope(cacheKey, this.current, this.scope)
+              retainScope = true
+            }
           }
-        }
-        if (!retainScope) {
+          if (!retainScope) {
+            this.scope.stop()
+          }
+        } else {
           this.scope.stop()
         }
-      } else {
-        this.scope.stop()
+      }
+      if (
+        transition &&
+        removeBranchWithLeave(this, transition, parent, render, key, noScope)
+      ) {
+        setActiveSub(prevSub)
+        return
       }
       if (parent) remove(this.nodes, parent)
     }
 
     const prevInstance = setCurrentInstance(instance)
     try {
-      this.renderBranch(render, parent, key)
+      this.renderBranch(
+        render,
+        transition,
+        parent,
+        key,
+        noScope,
+        wasMounted || !!parent,
+      )
     } finally {
       setCurrentInstance(...prevInstance)
     }
     setActiveSub(prevSub)
   }
 
-  renderBranch(render, parent, key) {
+  renderBranch(
+    render,
+    transition,
+    parent,
+    key,
+    noScope = false,
+    notifyUpdated = !!parent,
+  ) {
     this.current = key
     if (render) {
       const keepAliveCtx = isKeepAliveEnabled ? this.keepAliveCtx : null
-      const scope = keepAliveCtx && keepAliveCtx.getScope(this.current)
-      if (scope) {
-        this.scope = scope
+      const useScope = !noScope || !!this.hasFallthroughAttrs
+      if (useScope) {
+        const scope = keepAliveCtx && keepAliveCtx.getScope(this.current)
+        if (scope) {
+          this.scope = scope
+        } else {
+          this.scope = new EffectScope()
+        }
       } else {
-        this.scope = new EffectScope()
+        this.scope = undefined
       }
 
       const renderBranch = () => {
         this.nodes =
           this.runWithRenderCtx(
-            () => this.scope.run(render) || [],
+            () => (useScope ? this.scope.run(render) : render()) || [],
             this.scope,
           ) || []
         const blockKey = this.keyed ? this.current : this.$key
-        if (blockKey !== undefined && keepAliveCtx) {
+        if (
+          blockKey !== undefined &&
+          (transition || this.inTransition || keepAliveCtx)
+        ) {
           setBlockKey(this.nodes, blockKey)
+        }
+        if (isTransitionEnabled && transition) {
+          this.$transition = applyTransitionHooks(this.nodes, transition)
         }
         if (keepAliveCtx) {
           keepAliveCtx.processShapeFlag(this.nodes)
@@ -155,7 +220,7 @@ export class DynamicFragment extends VaporFragment {
       this.nodes = []
     }
 
-    if (parent && this.onUpdated) {
+    if (notifyUpdated && parent && this.onUpdated) {
       for (let i = 0; i < this.onUpdated.length; i++) {
         this.onUpdated[i](this.nodes)
       }
@@ -169,6 +234,10 @@ export function isFragment(val) {
 
 export function isDynamicFragment(val) {
   return val instanceof DynamicFragment
+}
+
+export function isSlotFragment(val) {
+  return isDynamicFragment(val) && !!val.isSlot
 }
 
 // ---------------------------------------------------------------------------
@@ -553,6 +622,7 @@ function recheckSlotFallback(outlet, force) {
 export class SlotFragment extends DynamicFragment {
   constructor() {
     super(__DEV__ ? 'slot' : undefined, false)
+    this.isSlot = true
     this.disposed = false
     this.forwarded = false
     this.parentSlotBoundary = getCurrentSlotBoundary()

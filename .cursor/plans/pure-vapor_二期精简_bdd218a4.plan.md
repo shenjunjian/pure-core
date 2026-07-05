@@ -297,7 +297,7 @@ CE 路径抽测：[`apiDefineCustomElement.js`](e:\core\packages\pure-vapor\src\
 ## 不在本计划范围
 
 - 修改 `compiler-vapor` / `runtime-vapor` / `vue` 包
-- 新增 Transition / Suspense / VDOM interop
+- 新增 Suspense / VDOM interop（Transition 已在初版 plan 后续补全）
 - 提供 TypeScript `.d.ts`（维持无 types 策略）
 
 ---

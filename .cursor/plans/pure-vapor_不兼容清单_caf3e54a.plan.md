@@ -9,8 +9,8 @@ todos:
     content: 在 Plan1/Plan2 文首与相关章节增加指向 Plan3 的链接；修正 Plan2 中 featureFlags 过时描述
     status: pending
   - id: sync-readme
-    content: （可选）README「首版不支持」与 Plan3 主表保持同步
-    status: pending
+    content: README「首版不支持」与 Plan3 主表保持同步（Transition 已支持）
+    status: completed
 isProject: false
 ---
 
@@ -63,7 +63,7 @@ isProject: false
 
 - [`compiler-vapor`](packages/compiler-vapor) 在 `runtimeModuleName: 'pure-vapor'` 下生成的 **Vapor 模板 helper**（`insert`、`renderEffect`、`createIf` 等）
 - **Composition API + `<script setup>`**（`defineProps` / `defineEmits` / …）
-- **Vapor 内置**：`VaporTeleport`、`VaporKeepAlive`；指令 `applyVShow`、`apply*Model`、`withVaporDirectives`
+- **Vapor 内置**：`VaporTeleport`、`VaporKeepAlive`、`VaporTransition`、`VaporTransitionGroup`；指令 `applyVShow`、`apply*Model`、`withVaporDirectives`
 - **客户端 CE**：`defineVaporCustomElement`（无 SSR CE）
 - **再导出**：完整 `@vue/reactivity` + `shared` 子集（见 [index.js](packages/pure-vapor/src/index.js)）
 
@@ -83,8 +83,8 @@ isProject: false
 | VDOM 渲染 | `h`, `createVNode`, `openBlock`, `Fragment`, … | import 失败 | Vapor 模板 + compiler helpers |
 | VDOM App | `render`, `hydrate` | import 失败 | `createVaporApp` + `mount` |
 | SSR | `createSSRApp`, `createVaporSSRApp`, `useSSRContext`, `onServerPrefetch`, `hydrateOn*`, … | 无服务端渲染/注水 | 仅 CSR；勿配 SSR 构建 |
-| VDOM 内置 | `Teleport`, `KeepAlive`, `Suspense`, `Transition`, `TransitionGroup` | import 失败 | `VaporTeleport`, `VaporKeepAlive`；勿用 Suspense/Transition |
-| Vapor 未实现 | `VaporTransition`, `VaporTransitionGroup`, `vaporInteropPlugin` | import 失败 | 避免 `<transition>`；勿混 VDOM |
+| VDOM 内置 | `Teleport`, `KeepAlive`, `Suspense`, `Transition`, `TransitionGroup` | import 失败 | `VaporTeleport`, `VaporKeepAlive`, `VaporTransition`, `VaporTransitionGroup`；勿用 Suspense |
+| Vapor 未实现 | `vaporInteropPlugin` | import 失败 | 勿混 VDOM |
 | VDOM 指令/CE | `withDirectives`, `vModelText`, `defineCustomElement`, `VueElement`, … | import 失败 | `apply*Model`, `defineVaporCustomElement` |
 | Options API / mixins | `app.mixin()`, Options 字段运行时 | 无合并/无 options 运行时 | 仅 `<script setup>` |
 | Devtools / compat | `devtools`, `setDevtoolsHook`, `compatUtils`, `vdomInterop*` | 无调试/互操作 | 不依赖 Vue Devtools Vapor 面板 |
@@ -119,7 +119,8 @@ isProject: false
 | 模板/编译行为 | 运行时现状 | 建议 |
 |---------------|------------|------|
 | `<Suspense>` | `compiler-vapor` 可能生成 import；**不导出** `Suspense` | 应用层禁止；Plan1 不改 compiler |
-| `<transition>` / `<Transition>` | 可能生成 `VaporTransition` import；**不导出** | 用 CSS/JS 动画，勿依赖 enter/leave 运行时 |
+| `<transition>` / `<Transition>` | 生成 `VaporTransition` import；**已导出** | 正常使用 `<transition>`；无 SSR hydration appear |
+| `<transition-group>` | 生成 `VaporTransitionGroup` import；**已导出** | 列表动画需 keyed children |
 | hydration helper import | [`hydration.js`](packages/pure-vapor/src/vapor/dom/hydration.js) **no-op stub** | 满足 import；无真实注水 |
 | `withHydration` 调用链 | no-op / 已删业务分支（Plan2 `strip-legacy`） | 勿依赖 SSR 注水语义 |
 

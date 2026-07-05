@@ -59,6 +59,7 @@ import {
   dynamicSlotsProxyHandlers,
   getScopeOwner,
   getSlot,
+  normalizeRawSlots,
   setCurrentSlotOwner,
 } from './componentSlots.js'
 import { createComment, createElement, createTextNode } from './dom/node.js'
@@ -356,11 +357,12 @@ export class VaporComponentInstance {
       this.props = this.attrs = EMPTY_OBJ
     }
 
-    this.rawSlots = rawSlots || EMPTY_OBJ
-    this.slots = rawSlots
-      ? rawSlots.$
-        ? new Proxy(rawSlots, dynamicSlotsProxyHandlers)
-        : rawSlots
+    const normalizedRawSlots = normalizeRawSlots(rawSlots)
+    this.rawSlots = normalizedRawSlots || EMPTY_OBJ
+    this.slots = normalizedRawSlots
+      ? normalizedRawSlots.$
+        ? new Proxy(normalizedRawSlots, dynamicSlotsProxyHandlers)
+        : normalizedRawSlots
       : EMPTY_OBJ
 
     // root 组件时为undefined.
@@ -475,6 +477,7 @@ export function createPlainElement(
   const _insertionAnchor = insertionAnchor
   resetInsertionState()
 
+  rawSlots = normalizeRawSlots(rawSlots)
   const defaultSlot = rawSlots && getSlot(rawSlots, 'default')
   const hasDynamicSlots = !!(rawSlots && rawSlots.$)
   const el = createElement(comp)

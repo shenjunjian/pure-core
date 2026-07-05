@@ -56,6 +56,7 @@ export {
   normalizeProps,
   normalizeClass,
   normalizeStyle,
+  extend,
 } from '@vue/shared'
 
 // ---------------------------------------------------------------------------
@@ -123,6 +124,7 @@ export { withModifiers, withKeys } from './internal/eventModifiers.js'
 // ---------------------------------------------------------------------------
 
 export { createVaporApp } from './vapor/apiCreateApp.js'
+export { vaporInteropPlugin } from './vapor/vaporInteropPlugin.js'
 export { defineVaporComponent } from './vapor/apiDefineComponent.js'
 export { defineVaporAsyncComponent } from './vapor/apiDefineAsyncComponent.js'
 export {
@@ -132,6 +134,8 @@ export {
 
 export { VaporTeleport } from './vapor/components/Teleport.js'
 export { VaporKeepAlive } from './vapor/components/KeepAlive.js'
+export { VaporTransition } from './vapor/components/Transition.js'
+export { VaporTransitionGroup } from './vapor/components/TransitionGroup.js'
 
 export { insert, prepend, remove } from './vapor/block.js'
 export { setInsertionState } from './vapor/insertionState.js'

@@ -1,6 +1,6 @@
 ---
 name: pure-vapor 纯运行时
-overview: 在 `packages/pure-vapor` 新增仅依赖 `@vue/shared` 与 `@vue/reactivity` 的纯 JavaScript Vapor 运行时，通过移植并精简 `runtime-vapor` 源码、用本地 `internal/` 模块替代全部 `@vue/runtime-dom` 依赖；公开 API 以 [`vue/src/index-with-vapor.ts`](packages/vue/src/index-with-vapor.ts) 的导出范围为基准（`export * from './index'` + `export * from '@vue/runtime-vapor'`），剔除 VDOM / 编译器 / SSR / 互操作 / devtools / Suspense / Transition 等 Vapor 用不到的符号；不修改任何现有 compiler-* / runtime-* 包。
+overview: 在 `packages/pure-vapor` 新增仅依赖 `@vue/shared` 与 `@vue/reactivity` 的纯 JavaScript Vapor 运行时，通过移植并精简 `runtime-vapor` 源码、用本地 `internal/` 模块替代全部 `@vue/runtime-dom` 依赖；公开 API 以 [`vue/src/index-with-vapor.ts`](packages/vue/src/index-with-vapor.ts) 的导出范围为基准（`export * from './index'` + `export * from '@vue/runtime-vapor'`），剔除 VDOM / 编译器 / SSR / 互操作 / devtools / Suspense 等 Vapor 用不到的符号；**含** `VaporTransition` / `VaporTransitionGroup`；不修改任何现有 compiler-* / runtime-* 包。
 todos:
   - id: scaffold
     content: 创建 packages/pure-vapor（package.json、index.js、src/index.js、README），配置仅 shared+reactivity 依赖与 esm-bundler 构建
@@ -18,7 +18,7 @@ todos:
     content: 移植 component 系统、slots、define* API、createVaporApp、fragment、templateRef
     status: completed
   - id: vapor-builtin
-    content: 移植 Teleport/KeepAlive、vShow/vModel/custom 指令、useVaporCssVars、defineVaporCustomElement（首版不含 Transition/TransitionGroup）
+    content: 移植 Teleport/KeepAlive、Transition/TransitionGroup、vShow/vModel/custom 指令、useVaporCssVars、defineVaporCustomElement
     status: completed
   - id: exports-index
     content: 完善 src/index.js：对齐 index-with-vapor 公开面（reactivity/shared 再导出 + runtime-core 子集 + runtime-vapor 全量）；按排除表剔除无用符号
@@ -27,7 +27,7 @@ todos:
     content: dev-only HMR：`internal/hmr.js` 初始化 `__VUE_HMR_RUNTIME__`；`vapor/hmr.js` + `component.js` 的 registerHMR / hmrRerender / hmrReload；`createVaporApp` 挂载时设置 `appContext.reload`
     status: completed
   - id: tests-docs
-    content: 添加 __tests__（compiler-vapor 快照 + 移植 runtime-vapor 关键用例）；README 说明 runtimeModuleName 与 Suspense/Transition 限制
+    content: 添加 __tests__（compiler-vapor 快照 + 移植 runtime-vapor 关键用例含 Transition）；README 说明 runtimeModuleName 与 Suspense 限制
     status: pending
 isProject: false
 ---
@@ -42,11 +42,11 @@ isProject: false
 | 仅依赖 `shared`、`reactivity` | 所有原 `@vue/runtime-dom` / `runtime-core` 能力在 `pure-vapor/src/internal/` 内最小化自实现 |
 | 不兼容 VNode / SSR / devtools / VDOM 互操作 | 剔除对应模块与导出；`createVaporSSRApp`、`defineVaporSSRCustomElement`、`vaporInteropPlugin`、hydration、`vdomInterop*` 不实现 |
 | 不实现 Suspense | 不导出 `Suspense`；若模板使用 `<Suspense>`，在文档中标注不支持（编译器仍会生成 import，需在应用层避免） |
-| 首版不做 Transition | 不实现、不导出 `VaporTransition` / `VaporTransitionGroup`；不引入 `internal/transition.js` 及 `block` 中 Transition 专用分支；与 runtime 的 enter/leave 动画钩子解耦 |
+| Transition 已实现 | 移植 `internal/baseTransition.js`、`internal/transitionDom.js`、`internal/transitionGroupDom.js`、`internal/transitionRuntime.js`；`vapor/transition.js` 注册 hooks；`block.js` enter/leave 分支；导出 `VaporTransition` / `VaporTransitionGroup`（无 SSR hydration appear 路径） |
 | 仅 Composition API / setup | Vapor 组件只支持 `<script setup>`（及编译期宏）；**不支持** Options API 对象语法（`data` / `methods` / `computed` / `watch` 等 options 字段、`extends`、**mixins**） |
 | 不支持 mixins | `createVaporApp` 不提供 `app.mixin()`；`AppContext` 不含 `mixins` / `optionMergeStrategies` / `optionsCache`；与 `runtime-vapor` 一致（options 归一化缓存在组件 `__propsOptions` / `__emitsOptions` 上，而非 app 级 mixin 合并） |
 | 公开 API 基准 | 以 [`vue/src/index-with-vapor.ts`](packages/vue/src/index-with-vapor.ts) 为准：`./index`（`compile` + `runtime-dom` → `runtime-core`）+ `@vue/runtime-vapor`；实现落在 `pure-vapor/src/index.js`，**减去**下文排除表 |
-| Vapor 运行时符号 | [`runtime-vapor/src/index.ts`](packages/runtime-vapor/src/index.ts) 中符号名保持不变（**减去** SSR / interop / Suspense / Transition） |
+| Vapor 运行时符号 | [`runtime-vapor/src/index.ts`](packages/runtime-vapor/src/index.ts) 中符号名保持不变（**减去** SSR / interop / Suspense） |
 | JavaScript | 全部 `src/**/*.js`，无 `.ts`；`package.json` 不设 `types` 字段 |
 | 包名 | `"name": "pure-vapor"`，目录 `packages/pure-vapor`（符合 [`pnpm-workspace.yaml`](pnpm-workspace.yaml) 的 `packages/*`） |
 
@@ -83,7 +83,7 @@ flowchart TB
   Internal --> Reactivity
 ```
 
-**核心思路**：以 [`packages/runtime-vapor`](packages/runtime-vapor) 为功能蓝本，按文件一对一移植为 JS，同时将 33 处 `from '@vue/runtime-dom'` 改为 `from '../internal/...'`；`internal/` 只实现 Vapor 实际用到的 runtime-core 子集（调度器、当前实例、资源解析、错误边界、emit/props 规范化、scoped id 等）。**首版刻意不移植 Transition 运行时**（`transition.ts`、`components/Transition*`、`internal/transition.js`），`block.js` 仅保留无动画的 insert/remove 路径。
+**核心思路**：以 [`packages/runtime-vapor`](packages/runtime-vapor) 为功能蓝本，按文件一对一移植为 JS，同时将 33 处 `from '@vue/runtime-dom'` 改为 `from '../internal/...'`；`internal/` 只实现 Vapor 实际用到的 runtime-core 子集（调度器、当前实例、资源解析、错误边界、emit/props 规范化、scoped id、**transition 运行时** 等）。`block.js` 含 enter/leave 动画分支，由 `VaporTransition` 首次使用时注册 hooks。
 
 **DOM 写入**：与 `runtime-vapor` **一致，同步直接操作 DOM**。曾规划的 `jobDomOperatorList` + rAF 批量播放已移除；`onMounted` / `onUpdated` 与 DOM 落盘时序与官方 vapor 对齐。可选保留 [`vapor/dom/domOps.js`](packages/pure-vapor/src/vapor/dom/domOps.js) 作为集中封装的薄层（立即调用原生 API），非入队播放。
 
@@ -169,7 +169,7 @@ flowchart TB
 [`runtime-vapor/src/index.ts`](packages/runtime-vapor/src/index.ts) 中的 **VaporHelper + 公开 API**，包括但不限于：
 
 - App / 定义：`createVaporApp`、`defineVaporComponent`、`defineVaporAsyncComponent`、`defineVaporCustomElement`、`VaporElement`
-- 内置组件：`VaporTeleport`、`VaporKeepAlive`
+- 内置组件：`VaporTeleport`、`VaporKeepAlive`、`VaporTransition`、`VaporTransitionGroup`
 - 编译器 helpers：`insert`、`prepend`、`remove`、`setInsertionState`、`createComponent*`、`renderEffect`、`createSlot`、`withVaporCtx`、`template`、`child` / `nthChild` / `next` / `txt`、`setText` / `setProp` / …、`createIf`、`createFor*`、`createKeyedFragment`、`setBlockKey`、`createTemplateRefSetter`、`applyVShow`、`apply*Model`、`withVaporDirectives`、`isFragment`、`VaporFragment`、`DynamicFragment`、`delegateEvents`、`withVaporModifiers`、`withVaporKeys`、`useVaporCssVars` 等
 
 ### 2. 剔除：相对 `index-with-vapor` 不导出
@@ -183,18 +183,18 @@ flowchart TB
 | VDOM App | `createApp`、`render`、`hydrate` | 仅 `createVaporApp` |
 | SSR | `createSSRApp`、`createVaporSSRApp`、`defineSSRCustomElement`、`defineVaporSSRCustomElement`、`useSSRContext`、`ssrContextKey`、`ssrUtils`、`onServerPrefetch`、`hydrateOnIdle`、`hydrateOnVisible`、`hydrateOnMediaQuery`、`hydrateOnInteraction`、`createHydrationRenderer`、`setIsHydratingEnabled` | 无 SSR |
 | VDOM 内置组件 | `Teleport`、`KeepAlive`、`Suspense`、`BaseTransition`、`Transition`、`TransitionGroup` | Vapor 使用 `Vapor*` 对应项；`Suspense` 明确不做 |
-| Vapor 剔除 | `VaporTransition`、`VaporTransitionGroup`、`vaporInteropPlugin` | 首版不做 Transition；无 VDOM 互操作 |
+| Vapor 剔除 | `vaporInteropPlugin` | 无 VDOM 互操作 |
 | VDOM 指令 / CE | `withDirectives`、`vShow`、`vModelText`、`vModelCheckbox`、`vModelRadio`、`vModelSelect`、`vModelDynamic`、`defineCustomElement`、`VueElement`、`useShadowRoot`、`useHost` | Vapor 使用 `apply*` / `defineVaporCustomElement` |
 | Options API / mixins | `app.mixin()`、`__FEATURE_OPTIONS_API__`、app 级 `mixins` / `optionMergeStrategies` / `optionsCache` | Vapor 仅 setup；与 upstream `runtime-vapor` 相同，不做 mixin 合并 |
 | 互操作 / 兼容 | `vdomInterop*`、`compatUtils`、`DeprecationTypes`、`resolveFilter` | 无 compat / interop |
 | Devtools | `devtools`、`setDevtoolsHook` | 不实现 devtools |
 | Feature flags | `initFeatureFlags`、`internal/featureFlags.js` | 不实现 devtools / SSR / hydration；无需 `__FEATURE_PROD_DEVTOOLS__`、`__FEATURE_PROD_HYDRATION_MISMATCH_DETAILS__` 等编译期注入与全局默认值；`createVaporApp` 的 `prepareApp` 不调用 `initFeatureFlags` |
 | 编译器注册 | `registerRuntimeCompiler`、`isRuntimeOnly` | 无内置 compile |
-| Transition 运行时钩子 | `useTransitionState`、`resolveTransitionHooks`、`setTransitionHooks`、`getTransitionRawChildren` | 随 Transition 剔除 |
+| Transition 运行时钩子 | `useTransitionState`、`resolveTransitionHooks`、`setTransitionHooks`、`getTransitionRawChildren` | **不对外导出**（内部由 `VaporTransition` 使用）；VDOM 版 `Transition` / `TransitionGroup` 仍剔除 |
 | 自定义渲染器 | `createRenderer`、`MoveType`、`transformVNodeArgs` | Vapor 非可插拔 renderer API |
 | `@internal` 泄漏 | `runtime-dom` / `runtime-core` 中带 `@internal` 的导出（如 `ensureRenderer`、`nodeOps`、`patchProp`、`mergeDefaults` 等） | 仅内部使用 |
 
-> **Transition**：[`compiler-vapor` 的 `utils.ts`](packages/compiler-vapor/src/utils.ts) 仍可能生成 `VaporTransition` import；本包不导出，文档标明需在应用层避免。  
+> **Transition**：[`compiler-vapor`](packages/compiler-vapor) 生成 `VaporTransition` / `VaporTransitionGroup` import；本包已导出。无 SSR hydration appear 专用路径（CSR appear 通过正常 enter hooks）。  
 > **Suspense**：同上，不导出 `Suspense` / `VaporSuspense`。
 
 ### 3. 可选：迁移别名（非必须，exports-index 阶段决定）
@@ -244,10 +244,14 @@ packages/pure-vapor/
 │   │   ├── props.js          # normalizePropsOptions, 校验（精简版）
 │   │   ├── emit.js           # baseEmit
 │   │   ├── scopeId.js
-│   │   ├── hmr.js            # __DEV__：__VUE_HMR_RUNTIME__ 全局初始化
+│   │   ├── baseTransition.js   # useTransitionState, baseResolveTransitionHooks
+│   │   ├── transitionDom.js    # resolveTransitionProps, CSS class helpers
+│   │   ├── transitionGroupDom.js
+│   │   ├── transitionRuntime.js # performTransitionEnter/Leave, MoveType
 │   │   # 无 featureFlags.js（不兼容 devtools / SSR / hydration，见「剔除」表）
 │   └── vapor/            # 自 runtime-vapor 移植（文件名对应）
 │       ├── block.js
+│       ├── transition.js     # registerTransitionHooks 树摇注册
 │       ├── component.js
 │       ├── hmr.js            # __DEV__：hmrRerender / hmrReload（供 internal/hmr 调用）
 │       ├── renderEffect.js
@@ -280,7 +284,7 @@ packages/pure-vapor/
 |------|--------|------|
 | 模板克隆 | `dom/template.js` | 去掉 `hydration.ts` 引用；`withHydration` 改为 no-op 或直接删除调用链 |
 | 节点定位 | `dom/node.js` | `child`/`nthChild`/`next`/`txt`（读 DOM，保持同步） |
-| Block | `block.js`, `insertionState.js` | `insert`/`remove`/`prepend` 同步 DOM；**剔除** Transition 分支 |
+| Block | `block.js`, `insertionState.js` | `insert`/`remove`/`move` 含 Transition enter/leave 分支 |
 | 属性/事件 | `dom/prop.js`, `dom/event.js` | 同步写 DOM（经 `domOps` 或直接原生 API） |
 | 副作用 | `renderEffect.js` | `RenderEffect extends ReactiveEffect`；`render()` 内同步更新 DOM |
 | 控制流 | `apiCreateIf.js`, `apiCreateFor.js`, `apiCreateFragment.js`, `helpers/setKey.js` | 与快照行为一致 |
@@ -301,12 +305,12 @@ packages/pure-vapor/
 
 | 模块 | 说明 |
 |------|------|
-| `components/Teleport.js`, `KeepAlive.js` | 移植；Teleport DOM 移动同步写入 |
+| `components/Teleport.js`, `KeepAlive.js`, `Transition.js`, `TransitionGroup.js` | 移植；KeepAlive activate/deactivate 传 `MoveType` |
 | `directives/vShow.js`, `vModel.js`, `custom.js` | v-model 全系列 `apply*Model` |
 | `helpers/useCssVars.js` | SFC `useVaporCssVars` 注入需要 |
 | `apiDefineCustomElement.js` | 保留客户端 CE；去掉 SSR CE |
 
-**明确跳过**：`suspense.ts`、`vdomInterop*.ts`、`dom/hydration.ts`、`transition.ts`、`components/Transition.ts`、`components/TransitionGroup.ts`。
+**明确跳过**：`suspense.ts`、`vdomInterop*.ts`、`dom/hydration.ts` 中 Transition hydration appear 专用逻辑（CSR 路径已实现）。
 
 ### 阶段 E：公开入口与构建验证
 
@@ -323,7 +327,7 @@ vp run test pure-vapor
 ## 测试策略（不修改 compiler 包）
 
 1. **快照回归**：在 `packages/pure-vapor/__tests__/` 用 `compiler-vapor` 的 `compile()` 编译 fixture 模板，设置 `runtimeModuleName: 'pure-vapor'`，对生成的 `render` 做 smoke test（`new Function` + 简单 `createVaporApp` 挂载）。
-2. **移植关键单测**：优先移植与 DOM 更新、v-for/v-if、组件、指令相关的用例；**跳过** Transition / TransitionGroup 相关用例；异步路径用 `flushAll()`（`await Promise.resolve()` 等待 scheduler）。
+2. **移植关键单测**：优先移植与 DOM 更新、v-for/v-if、组件、指令、**Transition** 相关的用例；跳过 Suspense / interop / hydration 相关用例
 4. **exports 冒烟**：收集 `vapor-e2e-test` / 典型 SFC 中 `from 'vue'` 的 named import，断言在 `pure-vapor` 上可解析（排除表中的符号应失败并记入 README）。
 5. **可选**：在 `packages-private/` 增加最小 vapor playground（仅文档说明，不强制进主 CI），演示 Vite alias：
 
@@ -349,7 +353,7 @@ resolve: { alias: { vue: 'pure-vapor' } }
 |------|------|
 | `internal/` 与 upstream `runtime-core` 行为漂移 | 以 `runtime-vapor` 现有单测为黄金标准；关键路径写回归测试 |
 | 全量移植工作量大（~40 文件 × runtime-dom 耦合） | 按阶段 A→E 合 PR；每阶段可运行 build + 部分测试 |
-| `<Suspense>` / `<transition>` 模板仍可编译但运行失败 | README 明确不支持列表；不在本任务改 compiler |
+| `<Suspense>` 模板仍可编译但运行失败 | README 明确不支持列表；不在本任务改 compiler |
 | 无 TypeScript 导致维护成本 | 保持与 `runtime-vapor` 文件结构平行，便于 diff 同步 |
 | `__DEV__` / feature flags | 构建时沿用 monorepo 的 `__DEV__` 替换；去掉 devtools / prod devtools 分支 |
 | 与 `runtime-vapor` DOM/生命周期时序漂移 | 以 runtime-vapor 单测与 e2e 为黄金标准；`onMounted` 内应可读真实 DOM |
@@ -397,6 +401,6 @@ resolve: { alias: { vue: 'pure-vapor' } }
 ## 预期成果
 
 - 独立包 `pure-vapor`：仅 `shared` + `reactivity`，纯 JS，ESM bundler 构建产物。
-- 导出集合 ≈ [`index-with-vapor.ts`](packages/vue/src/index-with-vapor.ts) 对 Vapor 有意义的公开 API（减去 VDOM / compile / SSR / interop / devtools / Suspense / **Transition** 等排除表）；含完整 `@vue/reactivity` 再导出与 `shared` 常用工具。
+- 导出集合 ≈ [`index-with-vapor.ts`](packages/vue/src/index-with-vapor.ts) 对 Vapor 有意义的公开 API（减去 VDOM / compile / SSR / interop / devtools / Suspense 等排除表）；**含** `VaporTransition` / `VaporTransitionGroup`
 - 可运行由 `compiler-vapor` 生成的 vapor 组件（在配置 `runtimeModuleName: 'pure-vapor'` 时），无 VNode 运行时依赖，包体积与调用链更短。
 - **DOM 与调度**：与 `runtime-vapor` 一致，同步 DOM + `runtime-core` 风格 scheduler / `nextTick`。

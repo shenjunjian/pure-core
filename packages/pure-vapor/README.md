@@ -38,6 +38,7 @@ resolve: {
 | 语言 | 纯 `.js`，无 `.d.ts` |
 | DOM 更新 | 与 `runtime-vapor` 一致，同步直接写入 DOM |
 | `nextTick` | 与 `runtime-core` 一致，在 scheduler microtask flush 之后 |
+| Transition | 导出 `VaporTransition`、`VaporTransitionGroup`（与 `@vue/runtime-vapor` 对齐；无 SSR hydration appear 路径） |
 
 ## 首版不支持
 
@@ -49,11 +50,13 @@ resolve: {
 | VDOM | `h`、`createVNode`、`Fragment`、`openBlock`、… |
 | VDOM App | `createSSRApp`、`hydrate`（`createApp` 为 `createVaporApp` 的别名） |
 | SSR | `createVaporSSRApp`、`useSSRContext`、… |
-| VDOM 内置 | `Teleport`、`KeepAlive`、`Suspense`、`Transition` |
-| Vapor 剔除 | `VaporTransition`、`VaporTransitionGroup`、`vaporInteropPlugin` |
+| VDOM 内置 | `Teleport`、`KeepAlive`、`Suspense`、`Transition`（VDOM 版） |
+| Vapor 互操作 | `vaporInteropPlugin` 已导出为空实现（仅返回 app），无 VDOM 互操作能力 |
 | Devtools / compat | `devtools`、`compatUtils`、… |
 
-使用 `<Suspense>`、`<transition>` 或 `<Transition>` 的模板仍可被 `compiler-vapor` 生成对应 import，但本包不导出这些符号，应用层需避免或等待后续版本。
+使用 `<Suspense>` 的模板仍可被 `compiler-vapor` 生成对应 import，但本包不导出 `Suspense`，应用层需避免。
+
+`<transition>` / `<TransitionGroup>` 已支持：编译器生成 `VaporTransition` / `VaporTransitionGroup` import，本包已导出对应符号。
 
 ## 测试
 
@@ -67,7 +70,7 @@ vp run test pure-vapor
 
 - **编译器冒烟**：`compileSmoke.spec.js`（`runtimeModuleName: 'pure-vapor'` 快照 + `new Function` 挂载）
 - **导出契约**：`exports.spec.js`（必需符号存在、排除表符号不存在）
-- **移植用例**：`block` / `if` / `for` / `apiCreateVaporApp` / `renderEffect` / `internal`（源自 `runtime-vapor`，跳过 Transition / Suspense / interop / hydration）
+- **移植用例**：`block` / `if` / `for` / `apiCreateVaporApp` / `renderEffect` / `internal` / `Transition`（源自 `runtime-vapor`，跳过 Suspense / interop / hydration）
 
 需要等待 scheduler 队列时，使用 `__tests__/_utils.js` 的 `flushAll()`（`await Promise.resolve()`）。
 

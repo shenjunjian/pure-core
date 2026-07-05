@@ -65,6 +65,11 @@ export const dynamicSlotsProxyHandlers = {
   deleteProperty: NO,
 }
 
+export function normalizeRawSlots(rawSlots) {
+  if (!rawSlots) return rawSlots
+  return isFunction(rawSlots) ? { default: rawSlots } : rawSlots
+}
+
 export function getSlot(target, key) {
   if (key === '$') return
   const dynamicSources = target.$

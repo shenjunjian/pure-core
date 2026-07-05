@@ -7,6 +7,12 @@ import {
 import { isFragment } from './fragment.js'
 import { _child } from './dom/node.js'
 import { domInsert, domRemove } from './dom/domOps.js'
+import {
+  MoveType,
+  performTransitionEnter,
+  performTransitionLeave,
+} from '../internal/transitionRuntime.js'
+import { isTransitionEnabled } from './transition.js'
 
 export function isBlock(val) {
   return (
@@ -17,19 +23,21 @@ export function isBlock(val) {
   )
 }
 
-export function isValidBlock(block) {
+export function isValidBlock(block, componentAsValid = false) {
   if (!block) {
     return false
   } else if (block instanceof Node) {
     return !(block instanceof Comment)
   } else if (isVaporComponent(block)) {
-    return isValidBlock(block.block)
+    return componentAsValid || isValidBlock(block.block, componentAsValid)
   } else if (isArray(block)) {
-    return block.length > 0 && block.some(isValidBlock)
+    return (
+      block.length > 0 && block.some(b => isValidBlock(b, componentAsValid))
+    )
   } else {
     const isBlockValid = block.isBlockValid
     if (isBlockValid) {
-      return isBlockValid.call(block)
+      return isBlockValid.call(block, componentAsValid)
     }
     if (block.validityPending) {
       return true
@@ -37,17 +45,23 @@ export function isValidBlock(block) {
     const getEffectiveOutput = block.getEffectiveOutput
     return isValidBlock(
       getEffectiveOutput ? getEffectiveOutput.call(block) : block.nodes,
+      componentAsValid,
     )
   }
 }
 
-/** 插入block到父节点中 */
+export function isValidSlot(block) {
+  return isValidBlock(block, true)
+}
+
 export function insert(block, parent, anchor = null) {
-  console.log('enter insert:     ', block, parent, anchor)
-  anchor = anchor === 0 ? parent.$fc || _child(parent) : anchor
   if (block instanceof Node) {
-    domInsert(parent, block, anchor)
-  } else if (isVaporComponent(block)) {
+    insertNode(block, parent, anchor)
+    return
+  }
+
+  anchor = anchor === 0 ? parent.$fc || _child(parent) : anchor
+  if (isVaporComponent(block)) {
     if (block.isMounted && !block.isDeactivated) {
       insert(block.block, parent, anchor)
     } else {
@@ -55,48 +69,107 @@ export function insert(block, parent, anchor = null) {
     }
   } else if (isArray(block)) {
     for (let i = 0; i < block.length; i++) {
-      console.log('enter insert array:     ', block[i], parent, anchor)
       insert(block[i], parent, anchor)
     }
   } else {
-    // todo  什么时候会进入else逻辑？？
-    // 1. SlotFragment
-    debugger
-    if (block.anchor) {
-      insert(block.anchor, parent, anchor)
-      anchor = block.anchor
-    }
-    if (block.insert) {
-      block.insert(parent, anchor)
-    } else {
-      insert(block.nodes, parent, anchor)
-    }
+    insertFragment(block, parent, anchor)
   }
 }
 
-export function move(block, parent, anchor = null) {
+function insertNode(block, parent, anchor = null) {
+  anchor = anchor === 0 ? parent.$fc || _child(parent) : anchor
+  if (
+    isTransitionEnabled &&
+    block instanceof Element &&
+    block.$transition &&
+    !block.$transition.disabled
+  ) {
+    performTransitionEnter(block, block.$transition, () =>
+      domInsert(parent, block, anchor),
+    )
+  } else {
+    domInsert(parent, block, anchor)
+  }
+}
+
+function insertFragment(block, parent, anchor = null) {
+  anchor = anchor === 0 ? parent.$fc || _child(parent) : anchor
+  if (block.anchor) {
+    insertNode(block.anchor, parent, anchor)
+    anchor = block.anchor
+  }
+  if (block.insert) {
+    block.insert(parent, anchor, block.$transition)
+  } else {
+    insert(block.nodes, parent, anchor)
+  }
+}
+
+export function move(
+  block,
+  parent,
+  anchor = null,
+  moveType = MoveType.LEAVE,
+  parentComponent,
+) {
   anchor = anchor === 0 ? parent.$fc || _child(parent) : anchor
   if (block instanceof Node) {
-    domInsert(parent, block, anchor)
+    if (
+      isTransitionEnabled &&
+      block instanceof Element &&
+      block.$transition &&
+      !block.$transition.disabled &&
+      moveType !== MoveType.REORDER
+    ) {
+      if (moveType === MoveType.ENTER) {
+        performTransitionEnter(
+          block,
+          block.$transition,
+          () => domInsert(parent, block, anchor),
+          null,
+          true,
+        )
+      } else {
+        performTransitionLeave(
+          block,
+          block.$transition,
+          () => {
+            if (
+              moveType === MoveType.LEAVE &&
+              parentComponent &&
+              parentComponent.isUnmounted
+            ) {
+              block.remove()
+            } else {
+              domInsert(parent, block, anchor)
+            }
+          },
+          true,
+          true,
+        )
+      }
+    } else {
+      domInsert(parent, block, anchor)
+    }
   } else if (isVaporComponent(block)) {
     if (block.isMounted) {
-      move(block.block, parent, anchor)
+      move(block.block, parent, anchor, moveType, parentComponent)
     } else {
       mountComponent(block, parent, anchor)
     }
   } else if (isArray(block)) {
     for (let i = 0; i < block.length; i++) {
-      move(block[i], parent, anchor)
+      move(block[i], parent, anchor, moveType, parentComponent)
     }
   } else {
     if (block.anchor) {
-      move(block.anchor, parent, anchor)
+      move(block.anchor, parent, anchor, moveType, parentComponent)
       anchor = block.anchor
     }
     if (block.insert) {
-      block.insert(parent, anchor)
+      block.insert(parent, anchor, block.$transition)
     } else {
-      move(block.nodes, parent, anchor)
+      move(block.nodes, parent, anchor, moveType, parentComponent)
     }
   }
 }
@@ -108,7 +181,7 @@ export function prepend(parent, ...blocks) {
 
 export function remove(block, parent) {
   if (block instanceof Node) {
-    if (parent) domRemove(parent, block)
+    removeNode(block, parent)
   } else if (isVaporComponent(block)) {
     unmountComponent(block, parent)
   } else if (isArray(block)) {
@@ -116,15 +189,29 @@ export function remove(block, parent) {
       remove(block[i], parent)
     }
   } else {
-    if (block.remove) {
-      block.remove(parent)
-    } else {
-      remove(block.nodes, parent)
-    }
-    if (block.anchor) remove(block.anchor, parent)
-    if (block.scope) {
-      block.scope.stop()
-    }
+    removeFragment(block, parent)
+  }
+}
+
+function removeNode(block, parent) {
+  if (isTransitionEnabled && block.$transition && block instanceof Element) {
+    performTransitionLeave(block, block.$transition, () => {
+      if (parent) domRemove(parent, block)
+    })
+  } else {
+    if (parent) domRemove(parent, block)
+  }
+}
+
+function removeFragment(block, parent) {
+  if (block.remove) {
+    block.remove(parent, block.$transition)
+  } else {
+    remove(block.nodes, parent)
+  }
+  if (block.anchor) removeNode(block.anchor, parent)
+  if (block.scope) {
+    block.scope.stop()
   }
 }
 

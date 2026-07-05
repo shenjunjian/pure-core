@@ -13,6 +13,7 @@ import { currentInstance } from '../../internal/instance.js'
 import { warn } from '../../internal/warning.js'
 import { defineVaporComponent } from '../apiDefineComponent.js'
 import { findBlockNode, insert, move, remove } from '../block.js'
+import { MoveType } from '../../internal/transitionRuntime.js'
 import { isVaporComponent } from '../component.js'
 import { createElement } from '../dom/node.js'
 import { unsetRef } from '../refCleanup.js'
@@ -301,7 +302,7 @@ function getInnerBlock(block) {
 }
 
 export function activate(instance, parentNode, anchor) {
-  move(instance.block, parentNode, anchor)
+  move(instance.block, parentNode, anchor, MoveType.ENTER, instance)
   queuePostFlushCb(() => {
     instance.isDeactivated = false
     if (instance.a) invokeArrayFns(instance.a)
@@ -312,7 +313,7 @@ export function deactivate(instance, container) {
   unsetRef(instance)
   invalidateMount(instance.m)
   invalidateMount(instance.a)
-  move(instance.block, container, null)
+  move(instance.block, container, null, MoveType.LEAVE, instance)
   queuePostFlushCb(() => {
     if (instance.da) invokeArrayFns(instance.da)
     instance.isDeactivated = true

@@ -23,11 +23,14 @@ const REQUIRED_EXPORTS = [
   'getCurrentInstance',
   'VaporTeleport',
   'VaporKeepAlive',
+  'VaporTransition',
+  'VaporTransitionGroup',
   'applyVShow',
   'withVaporDirectives',
   'useVaporCssVars',
   'createApp',
   'defineComponent',
+  'vaporInteropPlugin',
 ]
 
 /** Excluded per pure-vapor export contract (index-with-vapor minus table) */
@@ -39,9 +42,6 @@ const EXCLUDED_EXPORTS = [
   'createSSRApp',
   'createVaporSSRApp',
   'Suspense',
-  'VaporTransition',
-  'VaporTransitionGroup',
-  'vaporInteropPlugin',
   'hydrate',
   'Teleport',
   'KeepAlive',
@@ -69,6 +69,11 @@ describe('pure-vapor public exports', () => {
 
   test('createApp is a migration alias for createVaporApp', () => {
     expect(pureVapor.createApp).toBe(pureVapor.createVaporApp)
+  })
+
+  test('vaporInteropPlugin is a no-op stub that returns the app', () => {
+    const app = {}
+    expect(pureVapor.vaporInteropPlugin(app)).toBe(app)
   })
 
   test('version is exported', () => {
