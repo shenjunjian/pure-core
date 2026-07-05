@@ -99,12 +99,6 @@ export const VaporTransition = decorate((props, { slots, expose }) => {
         resolveTransitionBlock(frag.nodes),
         pendingVShows,
       )
-      if (!isMounted && props.appear) {
-        const root = resolveTransitionBlock(frag.nodes)
-        if (root && root.$transition) {
-          root.$transition.enter(getTransitionElement(root))
-        }
-      }
       isMounted = true
     })
     return frag
@@ -127,13 +121,6 @@ export const VaporTransition = decorate((props, { slots, expose }) => {
     if (!isMounted) {
       isMounted = true
       applyPendingVShows(hooks, root, pendingVShows)
-      if (props.appear && root) {
-        const el = getTransitionElement(root)
-        if (el && hooks) {
-          hooks.beforeEnter(el)
-          queuePostFlushCb(() => hooks.enter(el))
-        }
-      }
     }
   })
   return children

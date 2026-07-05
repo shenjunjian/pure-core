@@ -1,5 +1,5 @@
 import { onEffectCleanup } from '@vue/reactivity'
-import { isArray } from '@vue/shared'
+import { hyphenate, isArray } from '@vue/shared'
 import {
   ErrorCodes,
   callWithAsyncErrorHandling,
@@ -25,6 +25,22 @@ export function on(el, event, handler, options = {}) {
     if (!handler) return
     addEventListener(el, event, createInvoker(handler), options)
   }
+}
+
+const optionsModifierRE = /(?:Once|Passive|Capture)$/
+
+export function parseEventName(name) {
+  let options
+  if (optionsModifierRE.test(name)) {
+    options = {}
+    let m
+    while ((m = name.match(optionsModifierRE))) {
+      name = name.slice(0, name.length - m[0].length)
+      options[m[0].toLowerCase()] = true
+    }
+  }
+  const event = name[2] === ':' ? name.slice(3) : hyphenate(name.slice(2))
+  return [event, options]
 }
 
 export function onBinding(el, event, handler, options = {}) {

@@ -53,17 +53,25 @@ function setVarsOnBlock(block, vars) {
 }
 
 export function updateTeleportCssVars(frag) {
-  const ctx = frag.parentComponent
+  const ctx = frag.scopeOwner
   if (ctx && ctx.ut) {
     let node
     let anchor
-    if (frag.isDisabled) {
+    const location = frag.mountState && frag.mountState.location
+    if (location === 1) {
+      node = frag.placeholder
+      anchor = frag.anchor
+    } else if (location === 2) {
+      node = frag.targetStart
+      anchor = frag.targetAnchor
+    } else if (frag.isDisabled) {
       node = frag.placeholder
       anchor = frag.anchor
     } else {
       node = frag.targetStart
       anchor = frag.targetAnchor
     }
+    if (!node || !anchor) return
     while (node && node !== anchor) {
       if (node.nodeType === 1)
         node.setAttribute('data-v-owner', String(ctx.uid))

@@ -128,7 +128,7 @@ export function createComponent(
   }
   // TODO: 待分析
   if (isTeleportEnabled && isVaporTeleport(component)) {
-    const frag = component.process(rawProps, rawSlots)
+    const frag = component.process(rawProps, normalizeRawSlots(rawSlots))
     if (_insertionParent) {
       onScopeDispose(() => frag.dispose(), true)
     }
@@ -340,11 +340,15 @@ export class VaporComponentInstance {
       this.isDeactivated =
         false
     this.effectCount = 0
+    this.isOnce = !!once
 
-    this.rawProps = rawProps || EMPTY_OBJ
-    this.hasFallthrough = hasFallthroughAttrs(comp, rawProps)
+    this.rawProps =
+      this.isOnce && rawProps
+        ? snapshotRawProps(rawProps)
+        : rawProps || EMPTY_OBJ
+    this.hasFallthrough = hasFallthroughAttrs(comp, this.rawProps)
     if (rawProps || comp.props) {
-      const handlers = getPropsProxyHandlers(comp, once)
+      const handlers = getPropsProxyHandlers(comp)
       const propsHandlers = handlers[0]
       const attrsHandlers = handlers[1]
       this.attrs = new Proxy(this, attrsHandlers)

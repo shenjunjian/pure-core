@@ -1,17 +1,19 @@
 import {
+  EMPTY_OBJ,
   camelize,
   canSetValueDirectly,
   includeBooleanAttr,
   isArray,
   isOn,
   isString,
+  isSymbol,
   normalizeClass,
   normalizeStyle,
   parseStringStyle,
   toDisplayString,
 } from '@vue/shared'
 import { mergeProps } from '../../internal/mergeProps.js'
-import { onBinding } from './event.js'
+import { onBinding, parseEventName } from './event.js'
 import { patchStyle } from '../../internal/domStyle.js'
 import {
   shouldSetAsProp,
@@ -73,7 +75,11 @@ export function setAttr(el, key, value, isSVG = false) {
         domSetAttrNS(el, xlinkNS, key.slice(6), null)
       }
     } else {
-      domSetAttr(el, key, value)
+      if (value != null) {
+        domSetAttr(el, key, isSymbol(value) ? String(value) : value)
+      } else {
+        domSetAttr(el, key, null)
+      }
     }
   }
 }
@@ -167,19 +173,13 @@ function setClassIncremental(el, value, isNormalized = false) {
   const normalizedValue = isNormalized ? value : normalizeClass(value)
   const prev = el[cacheKey]
   if ((value = el[cacheKey] = normalizedValue) !== prev) {
-    const nextList = value ? value.split(/\s+/) : []
+    const nextList = value.split(/\s+/)
     if (value) {
-      domSetClassName(el, value)
-    } else {
-      domSetClassName(el, '')
+      el.classList.add(...nextList)
     }
     if (prev) {
-      const prevList = prev.split(/\s+/)
-      for (let i = 0; i < prevList.length; i++) {
-        const cls = prevList[i]
-        if (cls && nextList.indexOf(cls) === -1) {
-          // incremental remove handled by full className replace above
-        }
+      for (const cls of prev.split(/\s+/)) {
+        if (!nextList.includes(cls)) el.classList.remove(cls)
       }
     }
   }
@@ -317,7 +317,7 @@ function setHtmlToBlock(block, value) {
 }
 
 export function setDynamicProps(el, args, isSVG) {
-  const props = args.length > 1 ? mergeProps(...args) : args[0]
+  const props = args.length > 1 ? mergeProps(...args) : args[0] || EMPTY_OBJ
   const cacheKey = `$dprops${isApplyingFallthroughProps ? '$' : ''}`
   const prevProps = el[cacheKey]
   const nextProps = Object.create(null)
@@ -360,7 +360,8 @@ export function setDynamicProp(el, key, value, isSVG = false) {
     if (shouldSkipFallthroughKey(el, key)) {
       return
     }
-    onBinding(el, key[2].toLowerCase() + key.slice(3), value)
+    const [event, options] = parseEventName(key)
+    onBinding(el, event, value, options)
   } else if (
     (forceHydrate = key[0] === '.')
       ? ((key = key.slice(1)), true)

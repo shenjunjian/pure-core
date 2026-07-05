@@ -237,13 +237,30 @@ export function normalizeBlock(block) {
   return nodes
 }
 
-export function findBlockNode(block) {
+function isComment(node, data) {
+  return node.nodeType === 8 && (data === undefined || node.data === data)
+}
+
+export function findBlockBoundary(block) {
   const lastChild = findLastChild(block)
-  const parentNode = lastChild.parentNode
-  const nextNode = lastChild.nextSibling
+  let parentNode = lastChild.parentNode
+  let nextNode = lastChild.nextSibling
+
+  if (
+    nextNode &&
+    isComment(nextNode, ']') &&
+    isFragmentBlock(block) &&
+    !isComment(lastChild, ']') &&
+    !(lastChild.nodeType === 3 && !lastChild.data)
+  ) {
+    nextNode = nextNode.nextSibling
+  }
 
   return { parentNode, nextNode }
 }
+
+/** @deprecated use findBlockBoundary */
+export const findBlockNode = findBlockBoundary
 
 function findLastChild(node) {
   if (node && node instanceof Node) {

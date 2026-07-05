@@ -2,11 +2,15 @@
  * @vitest-environment jsdom
  */
 import { compile as compileVapor } from '@vue/compiler-vapor'
+import { compileScript, parse } from '@vue/compiler-sfc'
+import * as reactivity from '@vue/reactivity'
 import { VaporIfFlags } from '@vue/shared'
 import * as pureVapor from '../src/index.js'
 import { createVaporApp, nextTick } from '../src/index.js'
 
 export { pureVapor }
+
+const Vue = { ...reactivity, ...pureVapor }
 
 export function ifFlags(blockShape, once = false, index) {
   return (
@@ -107,4 +111,40 @@ export function compileToPureVaporRender(template, options = {}) {
     .replace(/export function render/, 'function render')
 
   return new Function('Vue', `${transformed}\nreturn render`)(pureVapor)
+}
+
+export function compile(
+  sfc,
+  data,
+  components = {},
+  { vapor = true, ssr = false } = {},
+) {
+  if (!sfc.includes(`<script`)) {
+    sfc =
+      `<script vapor>const data = _data; const components = _components;</script>` +
+      sfc
+  }
+  const descriptor = parse(sfc).descriptor
+
+  const script = compileScript(descriptor, {
+    id: 'x',
+    isProd: true,
+    inlineTemplate: true,
+    genDefaultAs: '__sfc__',
+    vapor,
+    templateOptions: { ssr },
+  })
+
+  const code =
+    script.content
+      .replace(/\bimport {/g, 'const {')
+      .replace(/ as _/g, ': _')
+      .replace(/} from ['"]vue['"]/g, `} = Vue`)
+      .replace(/} from ['"]pure-vapor['"]/g, `} = Vue`) + '\nreturn __sfc__'
+
+  return new Function('Vue', '_data', '_components', code)(
+    Vue,
+    data,
+    components,
+  )
 }

@@ -38,7 +38,9 @@ resolve: {
 | 语言 | 纯 `.js`，无 `.d.ts` |
 | DOM 更新 | 与 `runtime-vapor` 一致，同步直接写入 DOM |
 | `nextTick` | 与 `runtime-core` 一致，在 scheduler microtask flush 之后 |
-| Transition | 导出 `VaporTransition`、`VaporTransitionGroup`（与 `@vue/runtime-vapor` 对齐；无 SSR hydration appear 路径） |
+| Transition | 导出 `VaporTransition`、`VaporTransitionGroup`（CSR；无 SSR hydration appear） |
+| Template ref | 导出 `setStaticTemplateRef`、`setTemplateRefBinding`（compiler-vapor 生成） |
+| Hydration / SSR / interop | 不实现（见 [UPSTREAM-SYNC.md](./UPSTREAM-SYNC.md)） |
 
 ## 首版不支持
 
@@ -56,7 +58,7 @@ resolve: {
 
 使用 `<Suspense>` 的模板仍可被 `compiler-vapor` 生成对应 import，但本包不导出 `Suspense`，应用层需避免。
 
-`<transition>` / `<TransitionGroup>` 已支持：编译器生成 `VaporTransition` / `VaporTransitionGroup` import，本包已导出对应符号。
+`<transition>` / `<TransitionGroup>` / `<KeepAlive>` / `<Teleport>` 已支持：编译器生成对应 Vapor 内置 import，本包已导出。
 
 ## 测试
 
@@ -70,9 +72,16 @@ vp run test pure-vapor
 
 - **编译器冒烟**：`compileSmoke.spec.js`（`runtimeModuleName: 'pure-vapor'` 快照 + `new Function` 挂载）
 - **导出契约**：`exports.spec.js`（必需符号存在、排除表符号不存在）
-- **移植用例**：`block` / `if` / `for` / `apiCreateVaporApp` / `renderEffect` / `internal` / `Transition`（源自 `runtime-vapor`，跳过 Suspense / interop / hydration）
+- **控制流 / 组件核心**：`block` / `if` / `for` / `componentSlots` / `templateRef` / `renderEffect`
+- **内置组件**：`components/Transition` / `TransitionGroup` / `KeepAlive` / `Teleport`
+- **DOM 层**：`dom/prop` / `scopeId` / `componentProps`
+- **App / internal**：`apiCreateVaporApp` / `internal` / `multi-app` / `hmr`
 
 需要等待 scheduler 队列时，使用 `__tests__/_utils.js` 的 `flushAll()`（`await Promise.resolve()`）。
+
+## upstream 同步
+
+与 `@vue/runtime-vapor` 的模块对照、测试移植范围及后续 minor 合并流程见 [UPSTREAM-SYNC.md](./UPSTREAM-SYNC.md)。
 
 ## 开发
 

@@ -2,7 +2,7 @@ import { ShapeFlags, invokeArrayFns, isArray } from '@vue/shared'
 import { getComponentName } from '../../internal/component.js'
 import { isAsyncWrapper } from '../../internal/asyncComponent.js'
 import { matches, resetShapeFlag } from '../../internal/keepAlive.js'
-import { watch } from '../../internal/watch.js'
+import { renderEffect } from '../renderEffect.js'
 import {
   onBeforeUnmount,
   onMounted,
@@ -12,7 +12,7 @@ import { invalidateMount, queuePostFlushCb } from '../../internal/scheduler.js'
 import { currentInstance } from '../../internal/instance.js'
 import { warn } from '../../internal/warning.js'
 import { defineVaporComponent } from '../apiDefineComponent.js'
-import { findBlockNode, insert, move, remove } from '../block.js'
+import { findBlockBoundary, insert, move, remove } from '../block.js'
 import { MoveType } from '../../internal/transitionRuntime.js'
 import { isVaporComponent } from '../component.js'
 import { createElement } from '../dom/node.js'
@@ -47,6 +47,11 @@ const VaporKeepAliveImpl = defineVaporComponent({
     const storageContainer = createElement('div')
     const keptAliveScopes = new Map()
 
+    if (__DEV__) {
+      keepAliveInstance.__v_cache = cache
+      keepAliveInstance.__v_keptAliveScopes = keptAliveScopes
+    }
+
     const resolveCacheKeyFromBlock = (block, branchKey) => {
       return block.$key ?? branchKey ?? block.type
     }
@@ -71,6 +76,16 @@ const VaporKeepAliveImpl = defineVaporComponent({
     }
 
     const cacheBlock = (block = keepAliveInstance.block) => {
+      if (isDynamicFragment(block)) {
+        const transition = block.$transition
+        if (
+          transition &&
+          transition.mode === 'out-in' &&
+          transition.state.isLeaving
+        ) {
+          return
+        }
+      }
       const innerBlock = getInnerBlock(block)
       if (!innerBlock) return
 
@@ -116,10 +131,9 @@ const VaporKeepAliveImpl = defineVaporComponent({
       const scope = keptAliveScopes.get(key)
       if (scope) {
         keptAliveScopes.delete(key)
-        for (const entry of keptAliveScopes) {
-          if (entry[1] === scope) {
-            keptAliveScopes.delete(entry[0])
-            break
+        for (const [k, s] of keptAliveScopes) {
+          if (s === scope) {
+            keptAliveScopes.delete(k)
           }
         }
       }
@@ -130,7 +144,7 @@ const VaporKeepAliveImpl = defineVaporComponent({
       const cached = cache.get(key)
       if (cached && (!current || cached !== current)) {
         unsetShapeFlag(cached)
-        const pn = findBlockNode(cached).parentNode
+        const pn = findBlockBoundary(cached).parentNode
         if (pn) remove(cached, pn)
       } else if (current) {
         unsetShapeFlag(current)
@@ -141,14 +155,14 @@ const VaporKeepAliveImpl = defineVaporComponent({
       if (scope) scope.stop()
     }
 
-    watch(
-      () => [props.include, props.exclude],
-      ([include, exclude]) => {
+    renderEffect(() => {
+      const include = props.include
+      const exclude = props.exclude
+      queuePostFlushCb(() => {
         if (include) pruneCache(name => matches(include, name))
         if (exclude) pruneCache(name => !matches(exclude, name))
-      },
-      { flush: 'post', deep: true },
-    )
+      })
+    })
 
     onMounted(cacheBlock)
     onUpdated(cacheBlock)
@@ -172,7 +186,9 @@ const VaporKeepAliveImpl = defineVaporComponent({
 
       const deactivateCached = cached => {
         unsetShapeFlag(cached)
-        if (cached.a) queuePostFlushCb(cached.a)
+        if (isVaporComponent(cached) && cached.da) {
+          queuePostFlushCb(cached.da)
+        }
       }
 
       let matched = false

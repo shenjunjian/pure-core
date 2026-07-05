@@ -7,9 +7,9 @@ import {
   resolveTeleportTarget,
 } from '../../internal/teleportUtils.js'
 import { queuePostFlushCb } from '../../internal/scheduler.js'
-import { currentInstance, setCurrentInstance } from '../../internal/instance.js'
+import { setCurrentInstance } from '../../internal/instance.js'
 import { warn } from '../../internal/warning.js'
-import { insert, remove } from '../block.js'
+import { insert, move, remove } from '../block.js'
 import {
   createComment,
   createTextNode,
@@ -20,9 +20,16 @@ import { isVaporComponent } from '../component.js'
 import { rawPropsProxyHandlers } from '../componentProps.js'
 import { renderEffect } from '../renderEffect.js'
 import { VaporFragment, isFragment } from '../fragment.js'
-import { getScopeOwner } from '../componentSlots.js'
+import { MoveType } from '../../internal/transitionRuntime.js'
+import { applyTransitionHooks, isTransitionEnabled } from '../transition.js'
 import { enableTeleport } from '../teleport.js'
 import { updateTeleportCssVars } from '../helpers/useCssVars.js'
+
+const TeleportMountLocation = {
+  None: 0,
+  Main: 1,
+  Target: 2,
+}
 
 const VaporTeleportImpl = {
   name: 'VaporTeleport',
@@ -42,20 +49,17 @@ export class TeleportFragment extends VaporFragment {
     this.resolvedProps = null
     this.rawSlots = slots
     this.isDisabled = false
-    this.isMounted = false
     this.childrenInitialized = false
-    this.ownerInstance = currentInstance
     this.childrenScope = getCurrentScope()
-    this.parentComponent = getScopeOwner()
+    this.mountState = { location: TeleportMountLocation.None }
     this.anchor = __DEV__ ? createComment('teleport end') : createTextNode()
+
+    const propsProxy = new Proxy(this.rawProps, rawPropsProxyHandlers)
 
     renderEffect(() => {
       const prevTo = this.resolvedProps && this.resolvedProps.to
       const wasDisabled = this.isDisabled
-      this.resolvedProps = extend(
-        {},
-        new Proxy(this.rawProps, rawPropsProxyHandlers),
-      )
+      this.resolvedProps = extend({}, propsProxy)
       this.isDisabled = isTeleportDisabled(this.resolvedProps)
       if (
         wasDisabled !== this.isDisabled ||
@@ -70,9 +74,13 @@ export class TeleportFragment extends VaporFragment {
     return this.anchor ? parentNode(this.anchor) : null
   }
 
+  get scopeOwner() {
+    return this.slotOwner || this.renderInstance
+  }
+
   initChildren() {
     const prevInstance = setCurrentInstance(
-      this.ownerInstance,
+      this.renderInstance,
       this.childrenScope,
     )
     try {
@@ -116,7 +124,8 @@ export class TeleportFragment extends VaporFragment {
   }
 
   bindChildren(block) {
-    if (this.parentComponent && this.parentComponent.ut) {
+    const scopeOwner = this.scopeOwner
+    if (scopeOwner && scopeOwner.ut) {
       this.registerUpdateCssVars(block)
     }
     if (__DEV__) {
@@ -132,60 +141,96 @@ export class TeleportFragment extends VaporFragment {
   }
 
   handleChildrenUpdate(children) {
-    if (!this.parent || !this.mountContainer) {
+    const mountState = this.mountState
+    if (!this.parent || mountState.location === TeleportMountLocation.None) {
       this.nodes = children
       return
     }
-    remove(this.nodes, this.mountContainer)
-    insert((this.nodes = children), this.mountContainer, this.mountAnchor)
+
+    remove(this.nodes, mountState.container)
+    this.nodes = children
+    const onBeforeInsert = this.onBeforeInsert
+    if (onBeforeInsert) onBeforeInsert.forEach(fn => fn(this.nodes))
+    insert(children, mountState.container, mountState.anchor)
     this.bindChildren(this.nodes)
     updateTeleportCssVars(this)
   }
 
-  mount(parent, anchor) {
-    if (this.isMounted) {
-      insert(
-        this.nodes,
-        (this.mountContainer = parent),
-        (this.mountAnchor = anchor),
-      )
-    } else {
-      insert(
-        this.nodes,
-        (this.mountContainer = parent),
-        (this.mountAnchor = anchor),
-      )
-      this.isMounted = true
+  mount(parent, anchor, location) {
+    if (
+      isTransitionEnabled &&
+      this.$transition &&
+      this.mountState.location === TeleportMountLocation.None
+    ) {
+      applyTransitionHooks(this.nodes, this.$transition)
     }
+    if (this.mountState.location !== TeleportMountLocation.None) {
+      move(this.nodes, parent, anchor, MoveType.REORDER)
+    } else {
+      const onBeforeInsert = this.onBeforeInsert
+      if (onBeforeInsert) onBeforeInsert.forEach(fn => fn(this.nodes))
+      insert(this.nodes, parent, anchor)
+    }
+    this.mountState = { location, container: parent, anchor }
     updateTeleportCssVars(this)
   }
 
-  mountToTarget() {
+  prepareTargetAnchors(target) {
+    if (!this.targetAnchor || parentNode(this.targetAnchor) !== target) {
+      if (this.targetStart) {
+        remove(this.targetStart, parentNode(this.targetStart))
+      }
+      if (this.targetAnchor) {
+        remove(this.targetAnchor, parentNode(this.targetAnchor))
+      }
+      insert((this.targetStart = createTextNode('')), target)
+      insert((this.targetAnchor = createTextNode('')), target)
+    }
+  }
+
+  prepareTarget() {
     const target = (this.target = resolveTeleportTarget(
       this.resolvedProps,
       querySelector,
     ))
     if (target) {
-      if (!this.targetAnchor || parentNode(this.targetAnchor) !== target) {
-        if (this.targetStart) {
-          remove(this.targetStart, parentNode(this.targetStart))
-        }
-        if (this.targetAnchor) {
-          remove(this.targetAnchor, parentNode(this.targetAnchor))
-        }
-        insert((this.targetStart = createTextNode('')), target)
-        insert((this.targetAnchor = createTextNode('')), target)
-      }
+      this.prepareTargetAnchors(target)
 
-      this.ensureChildrenInitialized()
-
-      if (this.parentComponent && this.parentComponent.isCE) {
-        const ce = this.parentComponent.ce
+      const scopeOwner = this.scopeOwner
+      if (scopeOwner && scopeOwner.isCE) {
+        const ce = scopeOwner.ce
         if (!ce._teleportTargets) ce._teleportTargets = new Set()
         ce._teleportTargets.add(target)
       }
+    }
+    return target
+  }
 
-      this.mount(target, this.targetAnchor)
+  queueTargetUpdate() {
+    if (
+      !this.mountToTargetJob ||
+      this.mountToTargetJob.flags & SchedulerJobFlags.DISPOSED
+    ) {
+      this.mountToTargetJob = () => {
+        this.mountToTargetJob = undefined
+        if (!this.anchor) return
+        if (this.isDisabled) {
+          if (!this.targetAnchor) {
+            this.prepareTarget()
+          }
+        } else {
+          this.mountToTarget()
+        }
+      }
+    }
+    queuePostFlushCb(this.mountToTargetJob)
+  }
+
+  mountToTarget() {
+    const target = this.prepareTarget()
+    if (target) {
+      this.ensureChildrenInitialized()
+      this.mount(target, this.targetAnchor, TeleportMountLocation.Target)
     } else if (__DEV__) {
       warn(
         `Invalid Teleport target on ${this.targetAnchor ? 'update' : 'mount'}:`,
@@ -195,47 +240,25 @@ export class TeleportFragment extends VaporFragment {
     }
   }
 
-  clearMainViewChildren() {
-    if (!this.placeholder || !this.anchor) return
-
-    let node = this.placeholder.nextSibling
-    while (node && node !== this.anchor) {
-      const next = node.nextSibling
-      remove(node, parentNode(node))
-      node = next
-    }
-
-    this.isMounted = false
-    this.mountContainer = null
-  }
-
   handlePropsUpdate() {
     if (!this.parent) return
 
     if (this.isDisabled) {
       this.ensureChildrenInitialized()
-      this.mount(this.parent, this.anchor)
-    } else {
-      if (
-        this.placeholder &&
-        this.anchor &&
-        this.placeholder.nextSibling !== this.anchor
-      ) {
-        this.clearMainViewChildren()
-      }
-
-      if (isTeleportDeferred(this.resolvedProps) || !this.parent.isConnected) {
+      this.mount(this.parent, this.anchor, TeleportMountLocation.Main)
+      if (!this.targetAnchor) {
         if (
-          !this.mountToTargetJob ||
-          this.mountToTargetJob.flags & SchedulerJobFlags.DISPOSED
+          isTeleportDeferred(this.resolvedProps) ||
+          !this.parent.isConnected
         ) {
-          this.mountToTargetJob = () => {
-            this.mountToTargetJob = undefined
-            if (this.isDisabled || !this.anchor) return
-            this.mountToTarget()
-          }
+          this.queueTargetUpdate()
+        } else {
+          this.prepareTarget()
         }
-        queuePostFlushCb(this.mountToTargetJob)
+      }
+    } else {
+      if (isTeleportDeferred(this.resolvedProps) || !this.parent.isConnected) {
+        this.queueTargetUpdate()
       } else {
         this.mountToTarget()
       }
@@ -243,6 +266,9 @@ export class TeleportFragment extends VaporFragment {
   }
 
   insert = (container, anchor) => {
+    const wasMountedInTarget =
+      this.mountState.location === TeleportMountLocation.Target
+
     if (!this.placeholder) {
       this.placeholder = __DEV__
         ? createComment('teleport start')
@@ -251,7 +277,9 @@ export class TeleportFragment extends VaporFragment {
 
     insert(this.placeholder, container, anchor)
     insert(this.anchor, container, anchor)
-    this.handlePropsUpdate()
+    if (!wasMountedInTarget) {
+      this.handlePropsUpdate()
+    }
   }
 
   dispose = () => {
@@ -260,12 +288,13 @@ export class TeleportFragment extends VaporFragment {
       this.mountToTargetJob = undefined
     }
 
-    if (this.nodes && this.mountContainer) {
-      remove(this.nodes, this.mountContainer)
+    const mountState = this.mountState
+    if (this.nodes && mountState.location !== TeleportMountLocation.None) {
+      remove(this.nodes, mountState.container)
       this.nodes = []
     }
 
-    this.isMounted = false
+    this.mountState = { location: TeleportMountLocation.None }
 
     if (this.targetStart) {
       remove(this.targetStart, parentNode(this.targetStart))
@@ -277,8 +306,6 @@ export class TeleportFragment extends VaporFragment {
     }
 
     this.target = undefined
-    this.mountContainer = undefined
-    this.mountAnchor = undefined
   }
 
   remove = () => {
@@ -297,3 +324,5 @@ export class TeleportFragment extends VaporFragment {
 }
 
 export const VaporTeleport = /*@__PURE__*/ enableTeleport(VaporTeleportImpl)
+
+export { TeleportMountLocation }

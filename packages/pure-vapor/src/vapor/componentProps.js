@@ -118,7 +118,7 @@ export function snapshotRawProps(rawProps) {
   return snapshot
 }
 
-export function getPropsProxyHandlers(comp, once) {
+export function getPropsProxyHandlers(comp) {
   if (comp.__propsHandlers) {
     return comp.__propsHandlers
   }
@@ -185,8 +185,10 @@ export function getPropsProxyHandlers(comp, once) {
 
   const withOnceCache = getter => {
     return (instance, key) => {
-      const cache = instance.oncePropsCache || (instance.oncePropsCache = {})
-      if (!(key in cache)) {
+      const cache =
+        instance.oncePropsCache ||
+        (instance.oncePropsCache = Object.create(null))
+      if (!hasOwn(cache, key)) {
         pauseTracking()
         try {
           cache[key] = getter(instance, key)
@@ -199,9 +201,11 @@ export function getPropsProxyHandlers(comp, once) {
   }
 
   const getOnceProp = withOnceCache(getProp)
+  const getMaybeOnceProp = (instance, key) =>
+    (instance.isOnce ? getOnceProp : getProp)(instance, key)
   const propsHandlers = propsOptions
     ? {
-        get: (target, key) => (once ? getOnceProp : getProp)(target, key),
+        get: getMaybeOnceProp,
         has: (_, key) => isProp(key),
         ownKeys: () => Object.keys(propsOptions),
         getOwnPropertyDescriptor(target, key) {
@@ -209,7 +213,7 @@ export function getPropsProxyHandlers(comp, once) {
             return {
               configurable: true,
               enumerable: true,
-              get: () => (once ? getOnceProp : getProp)(target, key),
+              get: () => getMaybeOnceProp(target, key),
             }
           }
         },
@@ -240,18 +244,55 @@ export function getPropsProxyHandlers(comp, once) {
   const getOnceAttr = withOnceCache((instance, key) =>
     getAttr(instance.rawProps, key),
   )
+  const onceAttrKeys = Symbol()
+  const getAttrKeys = target =>
+    getKeysFromRawProps(target.rawProps).filter(isAttr)
+  const getOnceAttrKeys = target => {
+    const cache =
+      target.oncePropsCache || (target.oncePropsCache = Object.create(null))
+    if (!hasOwn(cache, onceAttrKeys)) {
+      pauseTracking()
+      try {
+        const keys = getAttrKeys(target)
+        cache[onceAttrKeys] = keys
+        for (let i = 0; i < keys.length; i++) {
+          const key = keys[i]
+          if (!hasOwn(cache, key)) {
+            cache[key] = getAttr(target.rawProps, key)
+          }
+        }
+      } finally {
+        resetTracking()
+      }
+    }
+    return cache[onceAttrKeys]
+  }
+  const getMaybeOnceAttrKeys = target =>
+    target.isOnce ? getOnceAttrKeys(target) : getAttrKeys(target)
+  const getMaybeOnceAttr = (instance, key) =>
+    instance.isOnce
+      ? getOnceAttrKeys(instance).includes(key)
+        ? getOnceAttr(instance, key)
+        : undefined
+      : getAttr(instance.rawProps, key)
   const attrsHandlers = {
-    get: (target, key) =>
-      once ? getOnceAttr(target, key) : getAttr(target.rawProps, key),
-    has: (target, key) => hasAttr(target.rawProps, key),
-    ownKeys: target => getKeysFromRawProps(target.rawProps).filter(isAttr),
+    get: getMaybeOnceAttr,
+    has: (target, key) =>
+      target.isOnce
+        ? getOnceAttrKeys(target).includes(key)
+        : hasAttr(target.rawProps, key),
+    ownKeys: getMaybeOnceAttrKeys,
     getOwnPropertyDescriptor(target, key) {
-      if (isString(key) && hasAttr(target.rawProps, key)) {
+      if (
+        isString(key) &&
+        (target.isOnce
+          ? getOnceAttrKeys(target).includes(key)
+          : hasAttr(target.rawProps, key))
+      ) {
         return {
           configurable: true,
           enumerable: true,
-          get: () =>
-            once ? getOnceAttr(target, key) : getAttr(target.rawProps, key),
+          get: () => getMaybeOnceAttr(target, key),
         }
       }
     },

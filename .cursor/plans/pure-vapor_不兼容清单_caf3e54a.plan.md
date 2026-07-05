@@ -182,6 +182,7 @@ isProject: false
 ### 9. 维护约定
 
 - **单一事实来源**：API 不导出以 Plan1 剔除表 + `exports.spec.js` 的 `EXCLUDED_EXPORTS` 为准；行为差异以 Plan1 DOM 队列节 + README 为准
+- **upstream 同步**：模块对照与 minor 合并流程见 [`packages/pure-vapor/UPSTREAM-SYNC.md`](packages/pure-vapor/UPSTREAM-SYNC.md)（[官方同步计划](./pure-vapor_官方同步_0901f075.plan.md) 阶段 5）
 - 新增不兼容项：先更新 Plan3，再同步 [`README.md`](packages/pure-vapor/README.md)「首版不支持」表（可选 `sync-readme` todo）
 - Plan1 / Plan2 文首增加：`详见 [pure-vapor 不兼容清单](./pure-vapor_不兼容清单_<id>.plan.md)`
 

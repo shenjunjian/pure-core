@@ -19,13 +19,13 @@ todos:
     status: completed
   - id: builtins
     content: P1：合并当前 Transition WIP 后对齐 Transition/TransitionGroup/KeepAlive/Teleport + e2e 冒烟
-    status: pending
+    status: completed
   - id: dom-periphery
     content: P2：同步 dom/prop、scopeId、componentProps、defineComponent/CE + 剩余 CSR 测试
-    status: pending
+    status: completed
   - id: docs-sync-process
     content: 更新 README/Plan3，建立 upstream 同步清单与后续 minor 合并流程
-    status: pending
+    status: completed
 isProject: false
 ---
 

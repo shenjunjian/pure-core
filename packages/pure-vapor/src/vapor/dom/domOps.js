@@ -43,8 +43,8 @@ export function domSetClassName(el, value) {
   el.className = value
 }
 
-export function domSetStyle(el, property, value) {
-  el.style[property] = value
+export function domSetStyle(style, property, value) {
+  style[property] = value
 }
 
 export function domAddEventListener(el, event, handler, options) {
