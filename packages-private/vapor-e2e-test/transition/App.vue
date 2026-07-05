@@ -1,38 +1,19 @@
-<script setup vapor lang="ts">
-import type { Component } from 'vue'
-const props = defineProps<{
-  caseId: string
-}>()
-
-type CaseModule = { default: Component }
-const caseModules = import.meta.glob<CaseModule>('./cases/**/*.vue', {
-  eager: true,
-})
-const moduleKey = `./cases/${props.caseId}.vue`
-const selectedCase = caseModules[moduleKey]
-if (!selectedCase) {
-  const availableCases = Object.keys(caseModules)
-    .map(path => path.slice('./cases/'.length, -'.vue'.length))
-    .sort()
-    .join(', ')
-  throw new Error(
-    `[transition] Unknown case "${props.caseId}". Available cases: ${availableCases}`,
-  )
-}
-
-const currentCase = selectedCase.default
+<script setup vapor>
+import { ref } from 'vue'
+const toggle = ref(false)
 </script>
-
 <template>
-  <div class="transition-container">
-    <component :is="currentCase" />
-  </div>
+  <transition name="fade">
+    <div v-if="toggle" class="test">content</div>
+  </transition>
+  <button @click="toggle = !toggle">Toggle</button>
 </template>
 
 <style>
-.transition-container > div {
-  padding: 15px;
-  border: 1px solid #f7f7f7;
-  margin-top: 15px;
+.fade-enter-active, .fade-leave-active {
+  transition: opacity 0.3s;
+}
+.fade-enter-from, .fade-leave-to {
+  opacity: 0;
 }
 </style>

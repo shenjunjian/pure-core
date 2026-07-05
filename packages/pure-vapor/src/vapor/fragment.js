@@ -13,6 +13,12 @@ import { currentInstance, setCurrentInstance } from '../internal/instance.js'
 import { renderEffect } from './renderEffect.js'
 import { currentSlotOwner, setCurrentSlotOwner } from './componentSlots.js'
 import { isVaporComponent } from './component.js'
+import {
+  isTransitionEnabled,
+  deferBranchUpdateDuringLeave,
+  removeBranchWithLeave,
+  applyTransitionHooks,
+} from './transition.js'
 
 export class VaporFragment {
   constructor(nodes) {
@@ -82,28 +88,59 @@ export class DynamicFragment extends VaporFragment {
     const prevSub = setActiveSub()
     const parent = this.anchor.parentNode
 
-    if (this.scope) {
-      if (isKeepAliveEnabled) {
-        let retainScope = false
-        const keepAliveCtx = this.keepAliveCtx
-        if (keepAliveCtx) {
-          const cacheKey = this.keyed
-            ? withCurrentCacheKey(this.current, () =>
-                keepAliveCtx.processShapeFlag(this.nodes),
-              )
-            : keepAliveCtx.processShapeFlag(this.nodes)
-          if (cacheKey !== false) {
-            keepAliveCtx.cacheScope(cacheKey, this.current, this.scope)
-            retainScope = true
+    // Check if transition is enabled and get transition hooks
+    const transition = isTransitionEnabled ? this.$transition : undefined
+    const wasMounted = this.current !== undefined
+
+    // Call onBeforeUpdate hooks
+    if (wasMounted && this.onBeforeUpdate) {
+      for (let i = 0; i < this.onBeforeUpdate.length; i++) {
+        this.onBeforeUpdate[i]()
+      }
+    }
+
+    // If currently leaving, defer mounting the next branch until leave finishes
+    if (transition && deferBranchUpdateDuringLeave(this, render, key, false)) {
+      setActiveSub(prevSub)
+      return
+    }
+
+    // Teardown previous branch
+    if (wasMounted) {
+      if (this.scope) {
+        if (isKeepAliveEnabled) {
+          let retainScope = false
+          const keepAliveCtx = this.keepAliveCtx
+          if (keepAliveCtx) {
+            const cacheKey = this.keyed
+              ? withCurrentCacheKey(this.current, () =>
+                  keepAliveCtx.processShapeFlag(this.nodes),
+                )
+              : keepAliveCtx.processShapeFlag(this.nodes)
+            if (cacheKey !== false) {
+              keepAliveCtx.cacheScope(cacheKey, this.current, this.scope)
+              retainScope = true
+            }
           }
-        }
-        if (!retainScope) {
+          if (!retainScope) {
+            this.scope.stop()
+          }
+        } else {
           this.scope.stop()
         }
-      } else {
-        this.scope.stop()
+
+        // If transition is enabled, try to remove with leave animation
+        if (
+          transition &&
+          removeBranchWithLeave(this, transition, parent, render, key, false)
+        ) {
+          // out-in mode: next branch mounts after leave finishes
+          setActiveSub(prevSub)
+          return
+        }
+
+        if (parent) remove(this.nodes, parent)
       }
-      if (parent) remove(this.nodes, parent)
     }
 
     const prevInstance = setCurrentInstance(instance)
@@ -138,6 +175,10 @@ export class DynamicFragment extends VaporFragment {
         }
         if (keepAliveCtx) {
           keepAliveCtx.processShapeFlag(this.nodes)
+        }
+        // Apply transition hooks if transition is enabled
+        if (isTransitionEnabled && this.$transition) {
+          this.$transition = applyTransitionHooks(this.nodes, this.$transition)
         }
       }
 

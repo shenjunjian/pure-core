@@ -11,4 +11,4 @@ if (!caseId) {
     '[transition] Missing "case" query param. Example: /transition/?case=transition-with-v-if/basic-transition',
   )
 }
-createVaporApp(App, { caseId }).use(vaporInteropPlugin).mount('#app')
+createVaporApp(App, { caseId }).mount('#app')

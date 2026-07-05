@@ -7,6 +7,7 @@ const toggle = ref(true)
 <template>
   <div class="if-basic">
     <div>
+      {{ toggle }}
       <transition>
         <div v-if="toggle" class="test">content</div>
       </transition>

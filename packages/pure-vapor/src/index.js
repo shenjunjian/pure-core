@@ -56,6 +56,7 @@ export {
   normalizeProps,
   normalizeClass,
   normalizeStyle,
+  extend,
 } from '@vue/shared'
 
 // ---------------------------------------------------------------------------
@@ -130,8 +131,22 @@ export {
   VaporElement,
 } from './vapor/apiDefineCustomElement.js'
 
-export { VaporTeleport } from './vapor/components/Teleport.js'
-export { VaporKeepAlive } from './vapor/components/KeepAlive.js'
+export {
+  VaporTeleport,
+  VaporTeleport as Teleport,
+} from './vapor/components/Teleport.js'
+export {
+  VaporKeepAlive,
+  VaporKeepAlive as KeepAlive,
+} from './vapor/components/KeepAlive.js'
+export {
+  VaporTransition,
+  VaporTransition as Transition,
+} from './vapor/components/Transition.js'
+export {
+  VaporTransitionGroup,
+  VaporTransitionGroup as TransitionGroup,
+} from './vapor/components/TransitionGroup.js'
 
 export { insert, prepend, remove } from './vapor/block.js'
 export { setInsertionState } from './vapor/insertionState.js'

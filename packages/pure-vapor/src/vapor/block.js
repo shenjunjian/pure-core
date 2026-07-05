@@ -8,6 +8,17 @@ import { isFragment } from './fragment.js'
 import { _child } from './dom/node.js'
 import { domInsert, domRemove } from './dom/domOps.js'
 
+/**
+ * @typedef {import('./components/transition-types.js').TransitionOptions} TransitionOptions
+ * @typedef {import('./components/transition-types.js').VaporTransitionHooks} VaporTransitionHooks
+ * @typedef {import('./components/transition-types.js').TransitionBlock} TransitionBlock
+ */
+
+/**
+ * @typedef {Node | import('./fragment.js').VaporFragment | import('./fragment.js').DynamicFragment | import('./component.js').VaporComponentInstance} Block
+ * @typedef {function(): Block} BlockFn
+ */
+
 export function isBlock(val) {
   return (
     val instanceof Node ||
@@ -61,7 +72,6 @@ export function insert(block, parent, anchor = null) {
   } else {
     // todo  什么时候会进入else逻辑？？
     // 1. SlotFragment
-    debugger
     if (block.anchor) {
       insert(block.anchor, parent, anchor)
       anchor = block.anchor
