@@ -1,10 +1,9 @@
 import { EffectScope, setActiveSub } from '@vue/reactivity'
 import { isArray } from '@vue/shared'
 import {
-  currentKeepAliveCtx,
+  getKeepAliveContext,
   isKeepAliveEnabled,
   setCurrentKeepAliveCtx,
-  withCurrentCacheKey,
 } from './keepAlive.js'
 import { setBlockKey } from './helpers/setKey.js'
 import { createComment, createTextNode } from './dom/node.js'
@@ -38,7 +37,7 @@ export class VaporFragment {
     this.slotOwner = currentSlotOwner
     this.slotBoundary = currentSlotBoundary
     if (isKeepAliveEnabled) {
-      this.keepAliveCtx = currentKeepAliveCtx
+      this.keepAliveCtx = getKeepAliveContext(currentInstance)
     }
   }
 
@@ -89,14 +88,12 @@ export class DynamicFragment extends VaporFragment {
   constructor(
     anchorLabel,
     keyed = false,
+    locate = true,
     trackSlotBoundary = false,
     onInvalid,
   ) {
     super([])
-    this.keyed = keyed
-    this.anchor =
-      __DEV__ && anchorLabel ? createComment(anchorLabel) : createTextNode()
-    if (__DEV__) this.anchorLabel = anchorLabel
+    if (keyed) this.keyed = true
     if (
       isTransitionEnabled &&
       currentInstance &&
@@ -104,6 +101,9 @@ export class DynamicFragment extends VaporFragment {
     ) {
       this.inTransition = true
     }
+    this.anchor =
+      __DEV__ && anchorLabel ? createComment(anchorLabel) : createTextNode()
+    if (__DEV__) this.anchorLabel = anchorLabel
     if (trackSlotBoundary) trackSlotBoundaryDirtying(this, onInvalid)
   }
 
@@ -138,26 +138,17 @@ export class DynamicFragment extends VaporFragment {
     const parent = this.getBranchParent()
 
     if (wasMounted) {
-      if (this.scope) {
-        if (isKeepAliveEnabled) {
-          let retainScope = false
-          const keepAliveCtx = this.keepAliveCtx
-          if (keepAliveCtx) {
-            const cacheKey = this.keyed
-              ? withCurrentCacheKey(this.current, () =>
-                  keepAliveCtx.processShapeFlag(this.nodes),
-                )
-              : keepAliveCtx.processShapeFlag(this.nodes)
-            if (cacheKey !== false) {
-              keepAliveCtx.cacheScope(cacheKey, this.current, this.scope)
-              retainScope = true
-            }
+      const scope = this.scope
+      if (scope) {
+        let retainScope = false
+        const onBeforeRemove = this.onBeforeRemove
+        if (onBeforeRemove) {
+          for (let i = 0; i < onBeforeRemove.length; i++) {
+            retainScope = onBeforeRemove[i](scope) || retainScope
           }
-          if (!retainScope) {
-            this.scope.stop()
-          }
-        } else {
-          this.scope.stop()
+        }
+        if (!retainScope) {
+          scope.stop()
         }
       }
       if (
@@ -199,7 +190,8 @@ export class DynamicFragment extends VaporFragment {
       const keepAliveCtx = isKeepAliveEnabled ? this.keepAliveCtx : null
       const useScope = !noScope || !!this.hasFallthroughAttrs
       if (useScope) {
-        const scope = keepAliveCtx && keepAliveCtx.getScope(this.current)
+        const scope =
+          keepAliveCtx && keepAliveCtx.acquireBranchScope(this.current)
         if (scope) {
           this.scope = scope
         } else {
@@ -210,33 +202,39 @@ export class DynamicFragment extends VaporFragment {
       }
 
       const renderBranch = () => {
-        this.nodes =
-          this.runWithRenderCtx(
-            () => (useScope ? this.scope.run(render) : render()) || [],
-            this.scope,
-          ) || []
-        const blockKey = this.keyed ? this.current : this.$key
-        if (
-          blockKey !== undefined &&
-          (transition || this.inTransition || keepAliveCtx)
-        ) {
-          setBlockKey(this.nodes, blockKey)
-        }
-        if (isTransitionEnabled && transition) {
-          this.$transition = applyTransitionHooks(this.nodes, transition)
-        }
-        if (keepAliveCtx) {
-          keepAliveCtx.processShapeFlag(this.nodes)
+        try {
+          this.nodes =
+            this.runWithRenderCtx(
+              () => (useScope ? this.scope.run(render) : render()) || [],
+              this.scope,
+            ) || []
+        } finally {
+          const blockKey = this.keyed ? this.current : this.$key
+          if (
+            blockKey !== undefined &&
+            (transition || this.inTransition || keepAliveCtx)
+          ) {
+            setBlockKey(this.nodes, blockKey)
+          }
+          if (isTransitionEnabled && transition) {
+            this.$transition = applyTransitionHooks(this.nodes, transition)
+          }
         }
       }
 
-      if (keepAliveCtx && this.keyed) {
-        withCurrentCacheKey(key, renderBranch)
+      if (keepAliveCtx) {
+        keepAliveCtx.runBranchRender(this, renderBranch)
       } else {
         renderBranch()
       }
 
       if (parent) {
+        const onBeforeInsert = this.onBeforeInsert
+        if (onBeforeInsert) {
+          for (let i = 0; i < onBeforeInsert.length; i++) {
+            onBeforeInsert[i](this.nodes)
+          }
+        }
         insert(this.nodes, parent, this.anchor)
       }
     } else {

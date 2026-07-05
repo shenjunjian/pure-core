@@ -1,3 +1,6 @@
+import { isAsyncWrapper } from '../internal/asyncComponent.js'
+import { isKeepAlive } from '../internal/keepAlive.js'
+
 /**该变量用于判断是否启用了 KeepAlive 功能。
  * 一个 编译时优化/Tree-shaking 标志
  */
@@ -18,6 +21,14 @@ export function enableKeepAlive() {
 export function withKeepAliveEnabled(value) {
   enableKeepAlive()
   return value
+}
+
+export function getKeepAliveContext(instance) {
+  let owner = instance
+  while (owner && owner.vapor && isAsyncWrapper(owner)) {
+    owner = owner.parent
+  }
+  return owner && owner.vapor && isKeepAlive(owner) ? owner.ctx : null
 }
 
 export function setCurrentKeepAliveCtx(ctx) {

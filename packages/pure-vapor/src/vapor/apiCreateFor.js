@@ -20,6 +20,8 @@ import { isVaporComponent } from './component.js'
 import { currentSlotOwner, setCurrentSlotOwner } from './componentSlots.js'
 import { renderEffect } from './renderEffect.js'
 import { ForBlock, ForFragment } from './fragment.js'
+import { setBlockKey } from './helpers/setKey.js'
+import { applyTransitionHooks, isTransitionEnabled } from './transition.js'
 import {
   insertionAnchor,
   insertionParent,
@@ -35,13 +37,27 @@ export function createFor(src, renderItem, getKey, flags = 0) {
   let isMounted = false
   let oldBlocks = []
   let newBlocks
+  let newKeys
   let parent
   let parentAnchor = __DEV__ ? createComment('for') : createTextNode()
 
-  const frag = new ForFragment(oldBlocks)
+  const trackSlotBoundary = !!(flags & VaporVForFlags.SLOT_ROOT)
+  const frag = new ForFragment(
+    oldBlocks,
+    trackSlotBoundary,
+    trackSlotBoundary
+      ? () => {
+          const parent = parentAnchor.parentNode
+          if (parent) remove(parentAnchor, parent)
+        }
+      : undefined,
+  )
   const instance = currentInstance
-  const canUseFastRemove = !!(flags & VaporVForFlags.FAST_REMOVE)
   const isComponent = !!(flags & VaporVForFlags.IS_COMPONENT)
+  const canUseFastRemove =
+    !!(flags & VaporVForFlags.FAST_REMOVE) && !isComponent
+  const isSingleNode = !!(flags & VaporVForFlags.IS_SINGLE_NODE)
+  const isFragment = !!(flags & VaporVForFlags.IS_FRAGMENT)
   const slotOwner = currentSlotOwner
 
   if (__DEV__ && !instance) {
@@ -64,10 +80,22 @@ export function createFor(src, renderItem, getKey, flags = 0) {
     const newLength = source.values.length
     const oldLength = oldBlocks.length
     newBlocks = new Array(newLength)
+    newKeys = undefined
+    if (getKey) {
+      newKeys = new Array(newLength)
+      for (let i = 0; i < newLength; i++) {
+        newKeys[i] = getKey(...getItem(source, i))
+      }
+    }
 
     const prevSub = setActiveSub()
-
-    if (!isMounted) {
+    const wasMounted = isMounted
+    if (wasMounted && frag.onBeforeUpdate) {
+      for (let i = 0; i < frag.onBeforeUpdate.length; i++) {
+        frag.onBeforeUpdate[i]()
+      }
+    }
+    if (!wasMounted) {
       isMounted = true
       for (let i = 0; i < newLength; i++) {
         mount(source, i)
@@ -104,14 +132,14 @@ export function createFor(src, renderItem, getKey, flags = 0) {
           unmount(oldBlocks[i])
         }
       } else {
-        keyedPatch(source, newLength, oldLength)
+        keyedPatch(source, newLength, oldLength, newKeys)
       }
     }
 
     frag.nodes = [(oldBlocks = newBlocks)]
     if (parentAnchor) frag.nodes.push(parentAnchor)
 
-    if (isMounted && frag.onUpdated) {
+    if (wasMounted && frag.onUpdated) {
       for (let i = 0; i < frag.onUpdated.length; i++) {
         frag.onUpdated[i]()
       }
@@ -119,7 +147,7 @@ export function createFor(src, renderItem, getKey, flags = 0) {
     setActiveSub(prevSub)
   }
 
-  const keyedPatch = (source, newLength, oldLength) => {
+  const keyedPatch = (source, newLength, oldLength, newKeys) => {
     const commonLength = Math.min(oldLength, newLength)
     const oldKeyIndexPairs = new Array(oldLength)
     const queuedBlocks = new Array(newLength)
@@ -131,7 +159,7 @@ export function createFor(src, renderItem, getKey, flags = 0) {
     while (endOffset < commonLength) {
       const index = newLength - endOffset - 1
       const item = getItem(source, index)
-      const key = getKey(...item)
+      const key = newKeys[index]
       const existingBlock = oldBlocks[oldLength - endOffset - 1]
       if (existingBlock.key !== key) break
       update(existingBlock, ...item)
@@ -145,7 +173,7 @@ export function createFor(src, renderItem, getKey, flags = 0) {
 
     for (let i = 0; i < e1; i++) {
       const currentItem = getItem(source, i)
-      const currentKey = getKey(...currentItem)
+      const currentKey = newKeys[i]
       const oldBlock = oldBlocks[i]
       if (oldBlock.key === currentKey) {
         update((newBlocks[i] = oldBlock), currentItem[0])
@@ -161,7 +189,7 @@ export function createFor(src, renderItem, getKey, flags = 0) {
 
     for (let i = e1; i < e3; i++) {
       const blockItem = getItem(source, i)
-      queuedBlocks[queuedBlocksLength++] = [i, blockItem, getKey(...blockItem)]
+      queuedBlocks[queuedBlocksLength++] = [i, blockItem, newKeys[i]]
     }
 
     queuedBlocks.length = queuedBlocksLength
@@ -252,7 +280,7 @@ export function createFor(src, renderItem, getKey, flags = 0) {
             )
             moveLink(block, nextBlock.prev, nextBlock)
           } else if (action.block.next !== nextBlock) {
-            insert(action.block, parent, anchorNode)
+            insertForBlock(action.block, anchorNode)
             moveLink(action.block, nextBlock.prev, nextBlock)
           }
         } else if (action.source) {
@@ -268,7 +296,7 @@ export function createFor(src, renderItem, getKey, flags = 0) {
         } else if (action.block.next !== undefined) {
           let anchorNode = anchor ? normalizeAnchor(anchor.nodes) : parentAnchor
           if (!anchorNode.parentNode) anchorNode = parentAnchor
-          insert(action.block, parent, anchorNode)
+          insertForBlock(action.block, anchorNode)
           moveLink(action.block, blocksTail)
           blocksTail = action.block
         }
@@ -283,12 +311,20 @@ export function createFor(src, renderItem, getKey, flags = 0) {
   const needKey = renderItem.length > 1
   const needIndex = renderItem.length > 2
 
+  const insertForBlock = isSingleNode
+    ? (block, anchor) => insert(block.nodes, parent, anchor)
+    : isFragment
+      ? (block, anchor) => insert(block.nodes, parent, anchor)
+      : (block, anchor) => insert(block.nodes, parent, anchor)
+
+  const removeForBlock = block => remove(block.nodes, parent)
+
   const mount = (
     source,
     idx,
     anchor = parentAnchor,
     itemTuple = getItem(source, idx),
-    key2 = getKey && getKey(...itemTuple),
+    key2 = newKeys ? newKeys[idx] : getKey && getKey(...itemTuple),
   ) => {
     const item = itemTuple[0]
     const key = itemTuple[1]
@@ -320,7 +356,20 @@ export function createFor(src, renderItem, getKey, flags = 0) {
       key2,
     ))
 
-    if (parent) insert(block.nodes, parent, anchor)
+    if (isTransitionEnabled && frag.$transition) {
+      if (frag.$transition.applyGroup) setBlockKey(block.nodes, block.key)
+      applyTransitionHooks(block.nodes, frag.$transition)
+    }
+
+    if (parent) {
+      const onBeforeInsert = frag.onBeforeInsert
+      if (onBeforeInsert) {
+        for (let i = 0; i < onBeforeInsert.length; i++) {
+          onBeforeInsert[i](block.nodes)
+        }
+      }
+      insertForBlock(block, anchor)
+    }
     return block
   }
 
@@ -345,7 +394,7 @@ export function createFor(src, renderItem, getKey, flags = 0) {
       block.scope.stop()
     }
     if (doRemove) {
-      remove(block.nodes, parent)
+      removeForBlock(block)
     }
   }
 

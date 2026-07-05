@@ -17,6 +17,7 @@ export class RenderEffect extends ReactiveEffect {
     super(noLifecycle ? render : undefined)
     this.render = render
     const instance = currentInstance
+    this.order = instance ? instance.effectCount++ : 0
     if (__DEV__ && !__TEST__ && !this.subs && !isVaporComponent(instance)) {
       warn('renderEffect called without active EffectScope or Vapor instance.')
     }
@@ -91,7 +92,7 @@ export class RenderEffect extends ReactiveEffect {
   notify() {
     const flags = this.flags
     if (!(flags & EffectFlags.PAUSED)) {
-      queueJob(this.job, this.i ? this.i.uid : undefined)
+      queueJob(this.job, this.i ? this.i.uid : undefined, false, this.order)
     }
   }
 }

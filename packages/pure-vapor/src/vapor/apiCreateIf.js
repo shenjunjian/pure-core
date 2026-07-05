@@ -35,6 +35,7 @@ export function createIf(
     frag = new DynamicFragment(
       __DEV__ ? 'if' : undefined,
       keyed,
+      false,
       trackSlotBoundary,
       trackSlotBoundary
         ? () => {
@@ -47,17 +48,20 @@ export function createIf(
     renderEffect(() => {
       const ok = condition()
       const render = ok ? b1 : b2
-      const noScope = !!(
-        flags & (ok ? VaporIfFlags.TRUE_NO_SCOPE : VaporIfFlags.FALSE_NO_SCOPE)
-      )
       if (keyed) {
-        frag.update(render, keyBase + (ok ? 0 : 1), noScope)
+        frag.update(render, keyBase + (ok ? 0 : 1), isNoScopeBranch(flags, ok))
       } else {
-        frag.update(render, render, noScope)
+        frag.update(render, render, isNoScopeBranch(flags, ok))
       }
     })
   }
 
   if (_insertionParent) insert(frag, _insertionParent, _insertionAnchor)
   return frag
+}
+
+function isNoScopeBranch(flags, ok) {
+  return !!(
+    flags & (ok ? VaporIfFlags.TRUE_NO_SCOPE : VaporIfFlags.FALSE_NO_SCOPE)
+  )
 }

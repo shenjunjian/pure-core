@@ -36,11 +36,19 @@ function findInsertionIndex(order, queue, start, end) {
   return start
 }
 
-export function queueJob(job, id, isPre = false) {
+export function queueJob(job, id, isPre = false, order = 0) {
   if (
     queueJobWorker(
       job,
-      id === undefined ? (isPre ? -2 : Infinity) : isPre ? id * 2 : id * 2 + 1,
+      id === undefined
+        ? isPre
+          ? -2
+          : Infinity
+        : isPre
+          ? id * 2
+          : order
+            ? id * 2 + 1 + order / (order + 1)
+            : id * 2 + 1,
       jobs,
       jobsLength,
       flushIndex,

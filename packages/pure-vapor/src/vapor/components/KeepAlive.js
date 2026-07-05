@@ -20,7 +20,7 @@ import { unsetRef } from '../refCleanup.js'
 import { isDynamicFragment, isFragment } from '../fragment.js'
 import {
   currentCacheKey,
-  setCurrentKeepAliveCtx,
+  withCurrentCacheKey,
   withKeepAliveEnabled,
 } from '../keepAlive.js'
 
@@ -52,23 +52,6 @@ const VaporKeepAliveImpl = defineVaporComponent({
     }
 
     let current
-
-    keepAliveInstance.ctx = {
-      getStorageContainer: () => storageContainer,
-      getCachedComponent: (comp, key) => {
-        const k =
-          key != null ? key : currentCacheKey != null ? currentCacheKey : comp
-        return cache.get(k)
-      },
-      activate: (instance, parentNode, anchor) => {
-        current = instance
-        activate(instance, parentNode, anchor)
-      },
-      deactivate: instance => {
-        current = undefined
-        deactivate(instance, storageContainer)
-      },
-    }
 
     const innerCacheBlock = (key, block, isCurrent) => {
       const max = props.max
@@ -214,6 +197,37 @@ const VaporKeepAliveImpl = defineVaporComponent({
     })
 
     const keepAliveCtx = {
+      getStorageContainer: () => storageContainer,
+      getCachedComponent: (comp, key) => {
+        const k =
+          key != null ? key : currentCacheKey != null ? currentCacheKey : comp
+        return cache.get(k)
+      },
+      activate: (instance, parentNode, anchor) => {
+        current = instance
+        activate(instance, parentNode, anchor)
+      },
+      deactivate: instance => {
+        current = undefined
+        deactivate(instance, storageContainer)
+      },
+      acquireBranchScope(key) {
+        return deleteScope(key)
+      },
+      runBranchRender(frag, fn) {
+        const run = () => {
+          try {
+            fn()
+          } finally {
+            processShapeFlag(frag.nodes)
+          }
+        }
+        if (frag.keyed) {
+          withCurrentCacheKey(frag.current, run)
+        } else {
+          run()
+        }
+      },
       processShapeFlag,
       cacheBlock,
       cacheScope(cacheKey, scopeLookupKey, scope) {
@@ -227,17 +241,17 @@ const VaporKeepAliveImpl = defineVaporComponent({
           keptAliveScopes.set(scopeLookupKey, scope)
         }
       },
-      getScope(key) {
-        return deleteScope(key)
-      },
     }
 
-    const prevCtx = setCurrentKeepAliveCtx(keepAliveCtx)
+    keepAliveInstance.ctx = keepAliveCtx
     let children = slots.default()
-    setCurrentKeepAliveCtx(prevCtx)
+    registerDynamicFragmentHooks(children, keepAliveCtx)
 
     if (isArray(children)) {
       children = children.filter(child => !(child instanceof Comment))
+      if (children.length === 1) {
+        registerDynamicFragmentHooks(children[0], keepAliveCtx)
+      }
       if (children.length > 1) {
         if (__DEV__) {
           warn(`KeepAlive should contain exactly one component child.`)
@@ -252,6 +266,29 @@ const VaporKeepAliveImpl = defineVaporComponent({
 
 export const VaporKeepAlive =
   /*@__PURE__*/ withKeepAliveEnabled(VaporKeepAliveImpl)
+
+function registerDynamicFragmentHooks(block, keepAliveCtx) {
+  if (!isDynamicFragment(block)) return
+
+  ;(block.onBeforeRemove || (block.onBeforeRemove = [])).push(scope => {
+    const cacheKey = block.keyed
+      ? withCurrentCacheKey(block.current, () =>
+          keepAliveCtx.processShapeFlag(block.nodes),
+        )
+      : keepAliveCtx.processShapeFlag(block.nodes)
+    if (cacheKey !== false) {
+      keepAliveCtx.cacheScope(cacheKey, block.current, scope)
+      return true
+    }
+    return false
+  })
+
+  ;(block.onUpdated || (block.onUpdated = [])).unshift(() => {
+    if (block.$transition && block.$transition.mode === 'out-in') {
+      keepAliveCtx.cacheBlock(block)
+    }
+  })
+}
 
 function shouldCache(block, props) {
   const isAsync = isAsyncWrapper(block)

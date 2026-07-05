@@ -3,8 +3,28 @@
  */
 import { ref } from '@vue/reactivity'
 import { BindingTypes } from '@vue/compiler-dom'
-import { createIf, createVaporApp, insert, template } from '../src/index.js'
-import { compileToPureVaporRender, flushAll } from './_utils.js'
+import { VaporBlockShape, VaporIfFlags } from '@vue/shared'
+import {
+  VaporTransition,
+  createComponent,
+  createIf,
+  createVaporApp,
+  insert,
+  template,
+} from '../src/index.js'
+import {
+  compileToPureVaporRender,
+  flushAll,
+  ifFlags,
+  makeRender,
+} from './_utils.js'
+
+const define = makeRender()
+const singleRootNoScopeIfElse =
+  VaporBlockShape.SINGLE_ROOT |
+  (VaporBlockShape.SINGLE_ROOT << 2) |
+  VaporIfFlags.TRUE_NO_SCOPE |
+  VaporIfFlags.FALSE_NO_SCOPE
 
 describe('Transition + v-if', () => {
   test('createIf toggles without transition', async () => {
@@ -56,5 +76,45 @@ describe('Transition + v-if', () => {
     toggle.value = true
     await flushAll()
     expect(root.innerHTML).toContain('class="test"')
+  })
+
+  test('should preserve no-scope pending branch during out-in transition', async () => {
+    const show = ref(true)
+    const onLeave = vi.fn((_, done) => setTimeout(done, 0))
+    const t0 = template('<div>foo</div>')
+    const t1 = template('<p>bar</p>')
+    let frag
+
+    const { host } = define(() =>
+      createComponent(
+        VaporTransition,
+        { mode: () => 'out-in', onLeave: () => onLeave },
+        {
+          default: () =>
+            (frag = createIf(
+              () => show.value,
+              () => t0(),
+              () => t1(),
+              ifFlags(singleRootNoScopeIfElse, false, 0),
+            )),
+        },
+        true,
+      ),
+    ).render()
+
+    expect(host.innerHTML).toBe('<div>foo</div><!--if-->')
+    expect(frag.scope).toBeUndefined()
+
+    show.value = false
+    await flushAll()
+    expect(host.textContent).toContain('foo')
+    expect(host.textContent).not.toContain('bar')
+    expect(onLeave).toHaveBeenCalledTimes(1)
+
+    await new Promise(r => setTimeout(r, 0))
+    await flushAll()
+    expect(host.innerHTML).toContain('bar')
+    expect(host.innerHTML).not.toContain('foo')
+    expect(frag.scope).toBeUndefined()
   })
 })

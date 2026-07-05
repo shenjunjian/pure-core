@@ -23,11 +23,7 @@ import { getFunctionalFallthrough } from '../internal/functionalFallthrough.js'
 import { warnExtraneousAttributes } from '../internal/warning.js'
 import { isAsyncWrapper } from '../internal/asyncComponent.js'
 import { isKeepAlive } from '../internal/keepAlive.js'
-import {
-  currentKeepAliveCtx,
-  isKeepAliveEnabled,
-  setCurrentKeepAliveCtx,
-} from './keepAlive.js'
+import { getKeepAliveContext, isKeepAliveEnabled } from './keepAlive.js'
 import { isTeleportEnabled, isVaporTeleport } from './teleport.js'
 import { markAsyncBoundary } from '../internal/useId.js'
 import { invalidateMount, queuePostFlushCb } from '../internal/scheduler.js'
@@ -51,6 +47,7 @@ import {
   normalizePropsOptions,
   resolveDynamicProps,
   setupPropsValidation,
+  snapshotRawProps,
 } from './componentProps.js'
 import { renderEffect } from './renderEffect.js'
 import { emit, normalizeEmitsOptions } from './componentEmits.js'
@@ -148,9 +145,11 @@ export function createComponent(
   )
 
   // TODO: 待分析
-  if (isKeepAliveEnabled && currentKeepAliveCtx && !isAsyncWrapper(instance)) {
-    currentKeepAliveCtx.processShapeFlag(instance)
-    setCurrentKeepAliveCtx(null)
+  if (isKeepAliveEnabled) {
+    const keepAliveCtx = getKeepAliveContext(currentInstance)
+    if (keepAliveCtx && !isAsyncWrapper(instance)) {
+      keepAliveCtx.processShapeFlag(instance)
+    }
   }
 
   // reset currentSlotOwner to null to avoid affecting the child components
@@ -340,6 +339,7 @@ export class VaporComponentInstance {
       this.isUpdating =
       this.isDeactivated =
         false
+    this.effectCount = 0
 
     this.rawProps = rawProps || EMPTY_OBJ
     this.hasFallthrough = hasFallthroughAttrs(comp, rawProps)

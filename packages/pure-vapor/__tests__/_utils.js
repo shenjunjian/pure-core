@@ -2,10 +2,19 @@
  * @vitest-environment jsdom
  */
 import { compile as compileVapor } from '@vue/compiler-vapor'
+import { VaporIfFlags } from '@vue/shared'
 import * as pureVapor from '../src/index.js'
 import { createVaporApp, nextTick } from '../src/index.js'
 
 export { pureVapor }
+
+export function ifFlags(blockShape, once = false, index) {
+  return (
+    blockShape |
+    (once ? VaporIfFlags.ONCE : 0) |
+    (index === undefined ? 0 : (index + 1) << VaporIfFlags.INDEX_SHIFT)
+  )
+}
 
 export function flushAll() {
   return nextTick()
