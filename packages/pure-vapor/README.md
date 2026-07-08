@@ -60,6 +60,29 @@ resolve: {
 
 `<transition>` / `<TransitionGroup>` / `<KeepAlive>` / `<Teleport>` 已支持：编译器生成对应 Vapor 内置 import，本包已导出。
 
+## vue-router 限制
+
+官方 **vue-router 不能直接在 pure-vapor 上使用**。`resolve.alias: { vue: 'pure-vapor' }` 时，`<router-view>` / `<router-link>` 无法正常工作。
+
+### 原因
+
+| 依赖 | pure-vapor | vue-router 的用法 | 结果 |
+|------|------------|-------------------|------|
+| `h()` | 不导出、不实现 VNode | `RouterView` / `RouterLink` 内部用 `h()` 创建 VNode 并渲染 | 不兼容 |
+| `setup(props, { attrs, slots })` | 支持该 API | `setup` 返回 `() => VNode` 渲染函数；scoped slot 传递 `{ Component: VNode, route }` | 语义属于 VDOM，与 Vapor block 模型不一致 |
+
+pure-vapor 中 Vapor 组件的 `setup` 通常直接返回 **block**（DOM 节点树，由 `compiler-vapor` 的 `inlineTemplate` 生成），`slots.default()` 返回的也是 block 而非 `VNode[]`。vue-router 的 `RouterView` 则用 `h(ViewComponent, props)` 构造 VNode，并通过 slot 把 **VNode** 传给外层（如 `<component :is="Component">` 配合 `<Transition>` / `<KeepAlive>`）。本包无 VNode 运行时与 patch 流程，也没有 VDOM 互操作（`vaporInteropPlugin` 仅为空 stub）。
+
+### 仍可能可用的部分
+
+不依赖 `h` 的路由**逻辑层** API（如 `createRouter`、`router.push`、`useRouter`、`useRoute`）在 API 层面与 pure-vapor 导出的 `inject` / `computed` / `ref` 等兼容，但**不能替代** `<router-view>` / `<router-link>` 的渲染能力。
+
+### 应用层建议
+
+- 不要指望将官方 vue-router 与 `vue → pure-vapor` alias 组合后开箱即用。
+- 需要 **Vapor 原生** 的 `RouterView` / `RouterLink`（或等价实现）：slot 传递组件定义或 block，动态出口使用 `createDynamicComponent`，而非 `h()` + VNode。
+- 用户模板中的 `<router-view v-slot="{ Component }">` 虽可由编译器生成 Vapor 代码，但瓶颈在 **vue-router 组件本身仍是 VDOM 实现**，而非用户侧是否手写 `setup(props, { slots })`。
+
 ## 测试
 
 ```bash
