@@ -69,7 +69,7 @@ isProject: false
 
 **不兼容**（本文件主体）：
 
-- 传统 **VNode / `h()` / `openBlock`** 渲染路径
+- 传统 **VNode / VDOM `h()` / `openBlock`** 渲染路径（本包 `h` 返回 Block，不能替代 VDOM patch）
 - **`vue` 全量包**中 VDOM、SSR、devtools、interop、Suspense、Transition 等（见下表）
 - 将 **Options API 对象组件**、**mixins**、**VDOM 子组件** 混入 Vapor 树而不做隔离
 
@@ -80,11 +80,11 @@ isProject: false
 | 分类 | 代表符号 | 后果 | 替代 |
 |------|----------|------|------|
 | 运行时编译 | `compile` | import 失败 | 构建期 `compiler-vapor` / `compiler-sfc` |
-| VDOM 渲染 | `h`, `createVNode`, `openBlock`, `Fragment`, … | import 失败 | Vapor 模板 + compiler helpers |
+| VDOM 渲染 | `createVNode`, `openBlock`, VDOM `Fragment` / `Text` / … | import 失败 | Vapor 模板 + compiler helpers；程序化渲染用 **Block 版** `h` / `Fragment`（非 VNode） |
 | VDOM App | `render`, `hydrate` | import 失败 | `createVaporApp` + `mount` |
 | SSR | `createSSRApp`, `createVaporSSRApp`, `useSSRContext`, `onServerPrefetch`, `hydrateOn*`, … | 无服务端渲染/注水 | 仅 CSR；勿配 SSR 构建 |
 | VDOM 内置 | `Teleport`, `KeepAlive`, `Suspense`, `Transition`, `TransitionGroup` | import 失败 | `VaporTeleport`, `VaporKeepAlive`, `VaporTransition`, `VaporTransitionGroup`；勿用 Suspense |
-| Vapor 未实现 | `vaporInteropPlugin` | import 失败 | 勿混 VDOM |
+| Vapor 互操作 | `vaporInteropPlugin` | 已导出为空 stub（无 VDOM 互操作） | 勿混 VDOM；勿依赖 interop |
 | VDOM 指令/CE | `withDirectives`, `vModelText`, `defineCustomElement`, `VueElement`, … | import 失败 | `apply*Model`, `defineVaporCustomElement` |
 | Options API / mixins | `app.mixin()`, Options 字段运行时 | 无合并/无 options 运行时 | 仅 `<script setup>` |
 | Devtools / compat | `devtools`, `setDevtoolsHook`, `compatUtils`, `vdomInterop*` | 无调试/互操作 | 不依赖 Vue Devtools Vapor 面板 |
@@ -99,6 +99,7 @@ isProject: false
 | `defineComponent` | `defineVaporComponent` | 非 Options 组件工厂 |
 | `defineAsyncComponent` | `defineVaporAsyncComponent` | — |
 | `useCssVars` | `useVaporCssVars` | — |
+| `h` / `Fragment` | Block 版程序化渲染（`src/vapor/h.js`） | **不是** VDOM `h` / `Fragment`；返回 Block，无 patch；不能驱动官方 vue-router |
 
 未列入别名表的 VDOM 名称（如 `useShadowRoot`）**不提供**。
 

@@ -171,6 +171,7 @@ flowchart TB
 - App / 定义：`createVaporApp`、`defineVaporComponent`、`defineVaporAsyncComponent`、`defineVaporCustomElement`、`VaporElement`
 - 内置组件：`VaporTeleport`、`VaporKeepAlive`、`VaporTransition`、`VaporTransitionGroup`
 - 编译器 helpers：`insert`、`prepend`、`remove`、`setInsertionState`、`createComponent*`、`renderEffect`、`createSlot`、`withVaporCtx`、`template`、`child` / `nthChild` / `next` / `txt`、`setText` / `setProp` / …、`createIf`、`createFor*`、`createKeyedFragment`、`setBlockKey`、`createTemplateRefSetter`、`applyVShow`、`apply*Model`、`withVaporDirectives`、`isFragment`、`VaporFragment`、`DynamicFragment`、`delegateEvents`、`withVaporModifiers`、`withVaporKeys`、`useVaporCssVars` 等
+- 程序化渲染（后补）：**Vapor 原生** `h`、`Fragment`（`src/vapor/h.js`）— 返回 Block，非 VNode；见 README「程序化渲染」
 
 ### 2. 剔除：相对 `index-with-vapor` 不导出
 
@@ -179,7 +180,7 @@ flowchart TB
 | 类别 | 不导出符号（示例） | 原因 |
 |------|-------------------|------|
 | 运行时编译 | `compile` | 属 `vue` 全量包 + `@vue/compiler-dom`；pure-vapor 仅运行时 |
-| VDOM 渲染 | `h`、`createVNode`、`cloneVNode`、`mergeProps`、`isVNode`、`Fragment`、`Text`、`Comment`、`Static`、`openBlock`、`createBlock`、`createElementVNode`、`createElementBlock`、`createTextVNode`、`createCommentVNode`、`createStaticVNode`、`guardReactiveProps`、`renderList`、`renderSlot`、`createSlots`、`withMemo`、`isMemoSame`、`withCtx`、`pushScopeId`、`popScopeId`、`withScopeId` | 无 VNode 运行时 |
+| VDOM 渲染 | `createVNode`、`cloneVNode`、`mergeProps`、`isVNode`、VDOM `Fragment` / `Text` / `Comment` / `Static`、`openBlock`、`createBlock`、`createElementVNode`、`createElementBlock`、`createTextVNode`、`createCommentVNode`、`createStaticVNode`、`guardReactiveProps`、`renderList`、`renderSlot`、`createSlots`、`withMemo`、`isMemoSame`、`withCtx`、`pushScopeId`、`popScopeId`、`withScopeId` | 无 VNode 运行时；**例外**：已导出 Block 语义的 `h` / `Fragment`（非 VDOM） |
 | VDOM App | `createApp`、`render`、`hydrate` | 仅 `createVaporApp` |
 | SSR | `createSSRApp`、`createVaporSSRApp`、`defineSSRCustomElement`、`defineVaporSSRCustomElement`、`useSSRContext`、`ssrContextKey`、`ssrUtils`、`onServerPrefetch`、`hydrateOnIdle`、`hydrateOnVisible`、`hydrateOnMediaQuery`、`hydrateOnInteraction`、`createHydrationRenderer`、`setIsHydratingEnabled` | 无 SSR |
 | VDOM 内置组件 | `Teleport`、`KeepAlive`、`Suspense`、`BaseTransition`、`Transition`、`TransitionGroup` | Vapor 使用 `Vapor*` 对应项；`Suspense` 明确不做 |

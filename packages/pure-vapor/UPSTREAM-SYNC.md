@@ -36,6 +36,12 @@
 - `createVaporSSRApp`、Suspense、VDOM 互操作 slot 路径
 - `runtime-dom` / `runtime-core` 整包依赖
 
+## pure-vapor 自有扩展（非 upstream）
+
+| 模块 | 说明 |
+|------|------|
+| `src/vapor/h.js` | Vapor 原生 `h` / `Fragment`：返回 Block，委托 `createPlainElement` / `createComponent` / `createDynamicComponent`；**不是** runtime-core 的 VDOM `h` |
+
 ## 测试移植对照
 
 | runtime-vapor | pure-vapor | 说明 |

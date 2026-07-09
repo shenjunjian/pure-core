@@ -199,6 +199,7 @@ export {
 export { useVaporCssVars } from './vapor/helpers/useCssVars.js'
 export { setBlockKey } from './vapor/helpers/setKey.js'
 export { createDynamicComponent } from './vapor/apiCreateDynamicComponent.js'
+export { h, Fragment } from './vapor/h.js'
 export { withAsyncContext } from './vapor/apiSetupHelpers.js'
 
 export { applyVShow } from './vapor/directives/vShow.js'

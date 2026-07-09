@@ -33,12 +33,13 @@ const REQUIRED_EXPORTS = [
   'createApp',
   'defineComponent',
   'vaporInteropPlugin',
+  'h',
+  'Fragment',
 ]
 
 /** Excluded per pure-vapor export contract (index-with-vapor minus table) */
 const EXCLUDED_EXPORTS = [
   'compile',
-  'h',
   'createVNode',
   'createApp', // VDOM — pure-vapor aliases createVaporApp instead; listed separately below
   'createSSRApp',
