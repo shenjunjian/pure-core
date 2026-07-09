@@ -1,5 +1,5 @@
 <script setup lang="ts" vapor>
-const version = "3.6.0-beta.17";
+const version = "3.6.0-beta.18";
 const compilerDirectives =
   "bind, cloak, else-if, else, for, html, if, model, on, once, pre, show, slot, text, memo";
 
@@ -71,13 +71,19 @@ const sections = [
     ],
     status: "supported" as const,
   },
+  {
+    id: "h-function",
+    label: "h() 函数",
+    apis: ["h()", "Fragment", "defineVaporComponent", "getter/ref props", "named slots"],
+    status: "supported" as const,
+  },
 ];
 
 const unsupported = [
   { api: "Suspense", reason: "pure-vapor 未导出，运行时会 import 失败" },
   { api: "Options API", reason: "仅支持 Composition API + <script setup vapor>" },
   { api: "getCurrentInstance()", reason: "在 Vapor 模式下返回 null" },
-  { api: "h() render function", reason: "无 VDOM 运行时" },
+  { api: "VDOM h() / VNode", reason: "pure-vapor 提供 Block 版 h，不兼容 VDOM 生态" },
   { api: "SSR", reason: "当前版本不支持服务端渲染" },
   { api: "vaporInteropPlugin", reason: "VDOM 互操作为空实现" },
   { api: "vue-router", reason: "依赖 VDOM API，与本项目不兼容" },

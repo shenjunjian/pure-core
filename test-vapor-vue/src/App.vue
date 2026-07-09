@@ -9,6 +9,7 @@ import BuiltinView from "./views/BuiltinView.vue";
 import CompositionView from "./views/CompositionView.vue";
 import LifecycleView from "./views/LifecycleView.vue";
 import LimitationsView from "./views/LimitationsView.vue";
+import HFunctionView from "./views/HFunctionView.vue";
 
 type SectionId =
   | "overview"
@@ -19,6 +20,7 @@ type SectionId =
   | "builtin"
   | "composition"
   | "lifecycle"
+  | "h-function"
   | "limitations";
 
 const sections: { id: SectionId; label: string; component: object }[] = [
@@ -30,6 +32,7 @@ const sections: { id: SectionId; label: string; component: object }[] = [
   { id: "builtin", label: "内置组件", component: BuiltinView },
   { id: "composition", label: "组合式 API", component: CompositionView },
   { id: "lifecycle", label: "生命周期", component: LifecycleView },
+  { id: "h-function", label: "h() 函数", component: HFunctionView },
   { id: "limitations", label: "限制说明", component: LimitationsView },
 ];
 

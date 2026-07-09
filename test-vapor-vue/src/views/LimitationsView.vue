@@ -20,10 +20,11 @@ const limitations = [
     workaround: "通过 props / emit / provide-inject 显式传递上下文。",
   },
   {
-    api: "h() render function",
+    api: "VDOM h() / VNode",
     category: "渲染",
-    reason: "pure-vapor 无 VDOM 运行时，不支持渲染函数与手动 h() 创建 VNode。",
-    workaround: "使用模板语法或 Vapor 编译输出。",
+    reason:
+      "pure-vapor 导出的是 Vapor-native h()，返回 Block 而非 VNode；不支持 VDOM 组件与 vue-router 等依赖 VNode patch 的库。",
+    workaround: "使用模板语法，或 defineVaporComponent + h() 程序化渲染（见「h() 函数」页）。",
   },
   {
     api: "SSR",
