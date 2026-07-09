@@ -1,4 +1,6 @@
-# pure-vapor
+_This package is **experimental**._
+
+# pure-vapor 纯 vapor模式
 
 纯 JavaScript 的 Vapor 运行时，仅依赖 `@vue/shared` 与 `@vue/reactivity`。用于在构建时通过 `compiler-vapor` 的 `runtimeModuleName: 'pure-vapor'` 替代 `@vue/runtime-vapor` + `@vue/runtime-dom`。
 
