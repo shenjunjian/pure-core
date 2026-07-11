@@ -22,7 +22,14 @@ export function isBlock(val) {
     isFragment(val)
   )
 }
+/** 判断 Block 是否有「有效内容」：
 
+-  Node: `Comment` 节点 → 无效
+- Array: 空数组 或 含有无效子项时 → 无效
+- 组件：默认看内部 `block`；`isValidSlot` 时组件本身算有效（对齐 VDOM slot 语义：有组件就算提供了内容）
+- Fragment：看 `nodes`（或自定义 `isBlockValid` / `getEffectiveOutput`）
+
+*/
 export function isValidBlock(block, componentAsValid = false) {
   if (!block) {
     return false
@@ -214,7 +221,7 @@ function removeFragment(block, parent) {
     block.scope.stop()
   }
 }
-
+/** 将所有类型的block, 统一为数组 */
 export function normalizeBlock(block) {
   if (!__DEV__ && !__TEST__) {
     throw new Error(

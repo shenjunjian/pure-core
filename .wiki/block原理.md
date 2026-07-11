@@ -146,9 +146,9 @@ class VaporFragment {
          ├─ .nodes ──► Block          实际内容
          └─ .anchor ──► Node?         插入锚点
               │
-              ├─ DynamicFragment      v-if / keyed
-              ├─ SlotFragment         slot
-              └─ ForBlock             v-for item
+              └─ ForBlock / ForFragment   v-for item
+              ├─ DynamicFragment        v-if / keyed
+                  └─  SlotFragment      slot
 ```
 
 Fragment、Slot、`v-if` / `v-for` **不另起一套挂载协议**，而是实现「长得像 Fragment 的 Block」，复用同一套 `insert` / `remove` / `move`。
@@ -198,10 +198,10 @@ remove(block):
 
 ### 4.4 `isValidBlock` / `isValidSlot`
 
-判断 Block 是否算「有有效内容」：
+判断 Block 是否有「有效内容」：
 
-- `Comment` 节点 → 无效
-- 空数组 / 全无效子项 → 无效
+- Node: `Comment` 节点 → 无效
+- Array: 空数组 或 含有无效子项时 → 无效
 - 组件：默认看内部 `block`；`isValidSlot` 时组件本身算有效（对齐 VDOM slot 语义：有组件就算提供了内容）
 - Fragment：看 `nodes`（或自定义 `isBlockValid` / `getEffectiveOutput`）
 
