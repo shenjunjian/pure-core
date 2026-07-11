@@ -139,11 +139,11 @@ onMounted(() => {
     DynamicFragment — keyed fragment
   </p>
   <button type="button" class="demo-btn" @click="fragKey++">
-    更换 key ({{ fragKey }})
+    更换 key ({{ fragKey }})------ 遗留问题： v-if + Key 会栈溢出
   </button>
-  <template :key="fragKey">
-    <p class="keyed-frag">keyed fragment 内容</p>
-  </template>
+  <!-- <template v-if="true" :key="fragKey">
+    <p class="keyed-frag">keyed fragment 内容 = {{ fragKey }}</p>
+  </template> -->
 
   <!-- ForFragment + ForBlock -->
   <p class="demo-label" data-block="ForFragment / ForBlock">
