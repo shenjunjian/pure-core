@@ -24,7 +24,7 @@ import {
   withKeepAliveEnabled,
 } from '../keepAlive.js'
 
-const VaporKeepAliveImpl = defineVaporComponent({
+const VaporKeepAliveImpl = /*@__PURE__*/ defineVaporComponent({
   name: 'VaporKeepAlive',
   __isKeepAlive: true,
   props: {

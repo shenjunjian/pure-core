@@ -42,7 +42,7 @@ const decorate = t => {
   return t
 }
 
-const VaporTransitionGroupImpl = defineVaporComponent({
+const VaporTransitionGroupImpl = /*@__PURE__*/ defineVaporComponent({
   name: 'VaporTransitionGroup',
 
   props: extend({}, TransitionPropsValidators, {
@@ -172,7 +172,8 @@ const VaporTransitionGroupImpl = defineVaporComponent({
   },
 })
 
-export const VaporTransitionGroup = decorate(VaporTransitionGroupImpl)
+export const VaporTransitionGroup =
+  /*@__PURE__*/ decorate(VaporTransitionGroupImpl)
 
 function applyGroupTransitionHooks(block, props, state, instance, updateHooks) {
   const fragments = []

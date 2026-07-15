@@ -20,6 +20,7 @@ import {
   applyTransitionHooks,
   deferBranchUpdateDuringLeave,
   displayName,
+  isVaporTransition,
   registerTransitionHooks,
   removeBranchWithLeave,
 } from '../transition.js'
@@ -54,77 +55,81 @@ const decorate = t => {
   return t
 }
 
-export const VaporTransition = decorate((props, { slots, expose }) => {
-  expose()
+export const VaporTransition =
+  /*@__PURE__*/ decorate((props, { slots, expose }) => {
+    expose()
 
-  ensureTransitionHooksRegistered()
+    ensureTransitionHooksRegistered()
 
-  const state = useTransitionState()
-  const instance = currentInstance
-  const { mode } = props
-  if (__DEV__) checkTransitionMode(mode)
+    const state = useTransitionState()
+    const instance = currentInstance
+    const { mode } = props
+    if (__DEV__) checkTransitionMode(mode)
 
-  const resolvedProps = computed(() => resolveTransitionProps(props))
-  const propsProxy = new Proxy(
-    {},
-    {
-      get(_, key) {
-        return resolvedProps.value[key]
+    const resolvedProps = computed(() => resolveTransitionProps(props))
+    const propsProxy = new Proxy(
+      {},
+      {
+        get(_, key) {
+          return resolvedProps.value[key]
+        },
       },
-    },
-  )
+    )
 
-  const shouldCaptureVShow = !!props.appear
+    const shouldCaptureVShow = !!props.appear
 
-  if (instance.rawSlots.$) {
-    const frag = new DynamicFragment('transition')
+    if (instance.rawSlots.$) {
+      const frag = new DynamicFragment('transition')
+      let isMounted = false
+      renderEffect(() => {
+        if (!frag.$transition) {
+          frag.$transition = resolveTransitionHooks(
+            frag,
+            propsProxy,
+            state,
+            instance,
+          )
+        } else {
+          frag.$transition.mode = resolvedProps.value.mode
+        }
+        const [, pendingVShows] = capturePendingVShows(
+          shouldCaptureVShow && !isMounted,
+          () => frag.update(slots.default),
+        )
+        applyPendingVShows(
+          frag.$transition,
+          resolveTransitionBlock(frag.nodes),
+          pendingVShows,
+        )
+        isMounted = true
+      })
+      return frag
+    }
+
+    const [children, pendingVShows] = capturePendingVShows(
+      shouldCaptureVShow,
+      () => (slots.default && slots.default()) || [],
+    )
+
+    let appliedHooks = {
+      state,
+      props: propsProxy,
+      instance,
+    }
     let isMounted = false
     renderEffect(() => {
-      if (!frag.$transition) {
-        frag.$transition = resolveTransitionHooks(
-          frag,
-          propsProxy,
-          state,
-          instance,
-        )
-      } else {
-        frag.$transition.mode = resolvedProps.value.mode
+      const { hooks, root } = applyResolvedTransitionHooks(
+        children,
+        appliedHooks,
+      )
+      appliedHooks = hooks
+      if (!isMounted) {
+        isMounted = true
+        applyPendingVShows(hooks, root, pendingVShows)
       }
-      const [, pendingVShows] = capturePendingVShows(
-        shouldCaptureVShow && !isMounted,
-        () => frag.update(slots.default),
-      )
-      applyPendingVShows(
-        frag.$transition,
-        resolveTransitionBlock(frag.nodes),
-        pendingVShows,
-      )
-      isMounted = true
     })
-    return frag
-  }
-
-  const [children, pendingVShows] = capturePendingVShows(
-    shouldCaptureVShow,
-    () => (slots.default && slots.default()) || [],
-  )
-
-  let appliedHooks = {
-    state,
-    props: propsProxy,
-    instance,
-  }
-  let isMounted = false
-  renderEffect(() => {
-    const { hooks, root } = applyResolvedTransitionHooks(children, appliedHooks)
-    appliedHooks = hooks
-    if (!isMounted) {
-      isMounted = true
-      applyPendingVShows(hooks, root, pendingVShows)
-    }
+    return children
   })
-  return children
-})
 
 const transitionTypeMap = new WeakMap()
 const inheritedTransitionKeyMap = new WeakMap()
@@ -451,7 +456,7 @@ function collectComponentTransitionBlocks(block, options, children) {
     return
   }
 
-  if (block.type === VaporTransition) return
+  if (isVaporTransition(block.type)) return
 
   const start = children.length
   collectTransitionBlocks(block.block, options, children)
