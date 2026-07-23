@@ -31,9 +31,10 @@ import {
   nextUid,
   popWarningContext,
   pushWarningContext,
-  queuePostFlushCb,
+  queuePostRenderEffect,
   registerHMR,
   resolveComponent,
+  restoreCurrentInstance,
   setCurrentInstance,
   setCurrentRenderingInstance,
   startMeasure,
@@ -81,7 +82,6 @@ import {
   type RawSlots,
   type StaticSlots,
   dynamicSlotsProxyHandlers,
-  getScopeOwner,
   getSlot,
   inOnceSlot,
   normalizeRawSlots,
@@ -130,10 +130,7 @@ import {
   parentSuspense,
   setParentSuspense,
 } from './suspense'
-import {
-  isCollectingVdomSlotVNodes,
-  isInteropEnabled,
-} from './vdomInteropState'
+import { isInteropEnabled } from './vdomInteropState'
 import {
   getCurrentScopeId,
   setComponentScopeId,
@@ -257,15 +254,6 @@ export function createComponent(
   const wasInOnceSlot = inOnceSlot
   if (wasInOnceSlot) once = true
 
-  if (isInteropEnabled && isCollectingVdomSlotVNodes) {
-    if (component.__vapor) {
-      // Vapor components cannot be represented as VDOM child metadata. Bail out
-      // with undefined so slots.default() falls back to the real renderSlot path.
-      return undefined as any
-    }
-    const owner = getScopeOwner()
-    if (owner) appContext = owner.appContext
-  }
   const _insertionParent = insertionParent
   const _insertionAnchor = insertionAnchor
   let hydrationClose: Node | null = null
@@ -350,13 +338,10 @@ export function createComponent(
         normalizeRawSlots(rawSlots),
         once,
       )
-      if (isCollectingVdomSlotVNodes) {
-        // VDOM interop children already expose frag.vnode for collection. Do not
-        // mount or hydrate the dry fragment.
-        return frag as any
-      }
       if (!isHydrating) {
-        if (_insertionParent) insert(frag, _insertionParent, _insertionAnchor)
+        if (_insertionParent) {
+          insert(frag, _insertionParent, _insertionAnchor, parentSuspense)
+        }
       } else {
         frag.hydrate()
       }
@@ -372,7 +357,9 @@ export function createComponent(
         onScopeDispose(() => frag.dispose(), true)
       }
       if (!isHydrating) {
-        if (_insertionParent) insert(frag, _insertionParent, _insertionAnchor)
+        if (_insertionParent) {
+          insert(frag, _insertionParent, _insertionAnchor, parentSuspense)
+        }
       } else {
         frag.hydrate()
       }
@@ -433,10 +420,33 @@ export function createComponent(
           // boundary rule above when the delayed setup actually runs.
           wasInOnceSlot ? () => withOnceSlot(setup, false) : setup,
         )
-      } else if (wasInOnceSlot) {
-        withOnceSlot(() => setupComponent(instance, component), false)
       } else {
-        setupComponent(instance, component)
+        if (wasInOnceSlot) {
+          withOnceSlot(() => setupComponent(instance, component), false)
+        } else {
+          setupComponent(instance, component)
+        }
+
+        if (
+          isHydrating &&
+          __FEATURE_SUSPENSE__ &&
+          isSuspenseEnabled &&
+          instance.suspense &&
+          instance.asyncDep
+        ) {
+          // Async setup cannot create `block` yet. Capture the adopted SSR
+          // range for pending move/removal before hydration advances past it.
+          const pendingBlock: Node[] = []
+          let node = hydrationCursor!.start!
+          const hydrationNext = nextLogicalSibling(node)
+          do {
+            pendingBlock.push(node)
+            node = node.nextSibling!
+          } while (node !== hydrationNext)
+          instance.pendingBlock =
+            pendingBlock.length === 1 ? pendingBlock[0] : pendingBlock
+          advanceHydrationNode(pendingBlock[pendingBlock.length - 1])
+        }
       }
     } finally {
       if (__DEV__) {
@@ -549,10 +559,19 @@ export function setupComponent(
   }
 
   setActiveSub(prevSub)
-  setCurrentInstance(...prevInstance)
+  restoreCurrentInstance(prevInstance)
 }
 
 export let isApplyingFallthroughProps = false
+
+export function shouldUseFunctionalFallthrough(
+  component: VaporComponent,
+): boolean {
+  return (
+    isFunction(component) &&
+    !(isTransitionEnabled && isVaporTransition(component))
+  )
+}
 
 export function applyFallthroughProps(
   el: Element,
@@ -570,15 +589,14 @@ export function applyFallthroughProps(
  * dev only
  */
 function createDevSetupStateProxy(
-  instance: VaporComponentInstance,
+  setupState: Record<string, any>,
 ): Record<string, any> {
-  const { setupState } = instance
-  return new Proxy(setupState!, {
+  return new Proxy(setupState, {
     get(target, key: string | symbol, receiver) {
       if (
         isString(key) &&
         !key.startsWith('__v') &&
-        !hasOwn(toRaw(setupState)!, key)
+        !hasOwn(toRaw(setupState), key)
       ) {
         warn(
           `Property ${JSON.stringify(key)} was accessed during render ` +
@@ -657,6 +675,10 @@ export class VaporComponentInstance<
   appContext: GenericAppContext
 
   block: TypeBlock
+  // VDOM can identify adopted SSR DOM with a placeholder VNode. Vapor adopts
+  // raw nodes, so storing them in `block` would make logical consumers treat
+  // them as rendered output. Keep temporary hydration ownership separate.
+  pendingBlock?: Node | Node[]
   scope: EffectScope
 
   rawProps: RawProps
@@ -694,6 +716,7 @@ export class VaporComponentInstance<
   suspenseId: number
   asyncDep: Promise<any> | null
   asyncResolved: boolean
+  asyncDepRegistered?: boolean
   restoreAsyncContext?: () => void | (() => void)
   deferredHydrationBoundary?: () => void
 
@@ -1065,27 +1088,75 @@ export function mountComponent(
     instance.asyncDep &&
     !instance.asyncResolved
   ) {
+    // Moving a still-pending instance, such as a keyed reorder or KeepAlive
+    // re-entry, retries `mountComponent`. `insert` relocates its already-mounted
+    // DOM without registering the async dependency again.
+    if (instance.asyncDepRegistered) {
+      if (instance.pendingBlock) {
+        insert(instance.pendingBlock, parent, anchor)
+      } else if (instance.block) {
+        insert(instance.block, parent, anchor)
+      }
+      if (
+        isKeepAliveEnabled &&
+        instance.shapeFlag! & ShapeFlags.COMPONENT_KEPT_ALIVE
+      ) {
+        // A cached pending instance still needs its initial mount after setup
+        // resolves. Restore only its active state; KeepAlive activation requires
+        // a mounted block.
+        instance.isDeactivated = false
+      }
+      return
+    }
+
+    const hydrating = isHydrating
+    if (!hydrating) {
+      // Keep a placeholder in the DOM while async setup is pending so
+      // sibling insertion and moves use the component's current position.
+      instance.block = createComment('')
+      insert(instance.block, parent, anchor)
+    }
+
+    instance.asyncDepRegistered = true
     const component = instance.type
     instance.suspense.registerDep(instance, setupResult => {
       // Final suspense retry after async setup resolves. Restore hydrating
       // mode so the last mount does not fall back to fresh DOM insertion.
       const reset =
         instance.restoreAsyncContext && instance.restoreAsyncContext()
+      // handleSetupResult may invoke the render function, which creates
+      // render effects that must be owned by this instance and its scope.
+      const handleResult = () => {
+        const prevInstance = setCurrentInstance(instance)
+        const prevSub = setActiveSub()
+        try {
+          handleSetupResult(setupResult, component, instance)
+        } finally {
+          setActiveSub(prevSub)
+          restoreCurrentInstance(prevInstance)
+        }
+      }
       try {
-        if (isHydrating) {
+        const pendingBlock = hydrating ? instance.pendingBlock! : instance.block
+        // Use the pending DOM's live boundary because it may have moved while
+        // setup was suspended.
+        const { parentNode, nextNode } = findBlockBoundary(pendingBlock)
+        if (hydrating) {
           withDeferredHydrationBoundary(() => {
-            handleSetupResult(setupResult, component, instance)
-            mountComponent(instance, parent, anchor)
+            handleResult()
+            mountComponent(instance, parentNode as ParentNode, nextNode)
             if (instance.deferredHydrationBoundary) {
               instance.deferredHydrationBoundary()
             }
           })
         } else {
-          handleSetupResult(setupResult, component, instance)
-          mountComponent(instance, parent, anchor)
+          handleResult()
+          mountComponent(instance, parentNode as ParentNode, nextNode)
+          remove(pendingBlock, parentNode as ParentNode)
         }
       } finally {
-        if (isHydrating) {
+        if (hydrating) {
+          instance.pendingBlock = undefined
           instance.deferredHydrationBoundary = undefined
         }
         instance.restoreAsyncContext = undefined
@@ -1095,9 +1166,11 @@ export function mountComponent(
     return
   }
 
+  // A pending async component may be cached before its initial mount.
   if (
     isKeepAliveEnabled &&
-    instance.shapeFlag! & ShapeFlags.COMPONENT_KEPT_ALIVE
+    instance.shapeFlag! & ShapeFlags.COMPONENT_KEPT_ALIVE &&
+    instance.isMounted
   ) {
     ;(instance.parent as KeepAliveInstance)!.ctx.activate(
       instance,
@@ -1121,20 +1194,25 @@ export function mountComponent(
   }
   if (instance.bm) invokeArrayFns(instance.bm)
   if (!isHydrating) {
-    insert(instance.block, parent, anchor)
+    // pass the owning suspense so enter transitions are skipped while
+    // mounting into a pending suspense's hidden container (vdom parity);
+    // the enter runs when the resolved branch is moved into the real tree.
+    insert(instance.block, parent, anchor, instance.suspense)
     setComponentScopeId(instance)
   } else {
     // Hydrated roots already have SSR scope attrs. Track dynamic roots so
     // client-only branch switches keep inherited scope ids.
     trackComponentScopeId(instance)
   }
-  if (instance.m) queuePostFlushCb(instance.m!)
+  if (instance.m) {
+    queuePostRenderEffect(instance.m!, undefined, instance.suspense)
+  }
   if (
     isKeepAliveEnabled &&
     instance.shapeFlag! & ShapeFlags.COMPONENT_SHOULD_KEEP_ALIVE &&
     instance.a
   ) {
-    queuePostFlushCb(instance.a!)
+    queuePostRenderEffect(instance.a!, undefined, instance.suspense)
   }
   instance.isMounted = true
   if (__DEV__) {
@@ -1145,6 +1223,7 @@ export function mountComponent(
 export function unmountComponent(
   instance: VaporComponentInstance,
   parentNode?: ParentNode,
+  parentSuspense: SuspenseBoundary | null = instance.suspense,
 ): void {
   // Skip unmount for kept-alive components - deactivate if called from remove()
   if (
@@ -1155,17 +1234,24 @@ export function unmountComponent(
     (instance.parent as KeepAliveInstance).ctx
   ) {
     if (parentNode) {
-      ;(instance.parent as KeepAliveInstance)!.ctx.deactivate(instance)
+      ;(instance.parent as KeepAliveInstance)!.ctx.deactivate(
+        instance,
+        parentSuspense,
+      )
     }
     return
   }
 
+  const pendingAsyncSetup =
+    __FEATURE_SUSPENSE__ && !!instance.asyncDep && !instance.asyncResolved
+
   if (
     !instance.isUnmounted &&
     (instance.isMounted ||
-      // A hydrating async setup component can be unmounted before its block exists.
-      // It still needs normal scope cleanup so a later resolve is ignored.
-      (instance.asyncDep && !instance.asyncResolved))
+      // An async setup component can be unmounted before it finishes mounting.
+      // It still needs normal unmount cleanup and must be marked unmounted so
+      // a later async resolution is ignored.
+      pendingAsyncSetup)
   ) {
     if (__DEV__) {
       unregisterHMR(instance)
@@ -1179,18 +1265,38 @@ export function unmountComponent(
     instance.scope.stop()
 
     if (instance.um) {
-      queuePostFlushCb(instance.um!)
+      queuePostRenderEffect(instance.um!, undefined, parentSuspense)
     }
     instance.isUnmounted = true
   }
 
-  if (parentNode) {
-    if (instance.block) {
-      remove(instance.block, parentNode)
-    } else {
-      // TODO: a hydrated async setup component may own SSR DOM before its
-      // block exists. That adopted DOM should be removed on this path.
+  if (__FEATURE_SUSPENSE__ && isSuspenseEnabled && pendingAsyncSetup) {
+    if (instance.pendingBlock) {
+      // Without parentNode this is state-only teardown. Leave the DOM intact
+      // for its enclosing owner, and retain the descriptor in case a
+      // subsequent Vapor block removal needs it.
+      if (parentNode) {
+        const pendingBlock = instance.pendingBlock
+        const { parentNode: blockParent } = findBlockBoundary(pendingBlock)
+        if (blockParent) {
+          remove(pendingBlock, blockParent as ParentNode)
+        }
+        instance.pendingBlock = undefined
+      }
+    } else if (instance.block instanceof Comment) {
+      // CSR placeholders are component-owned, so always detach them from their
+      // live parent even when VDOM owns an enclosing removal.
+      const blockParent = instance.block.parentNode
+      if (blockParent) {
+        remove(instance.block, blockParent)
+      }
     }
+  } else if (parentNode) {
+    if (instance.block) remove(instance.block, parentNode)
+  }
+  if (pendingAsyncSetup) {
+    instance.restoreAsyncContext = undefined
+    instance.deferredHydrationBoundary = undefined
   }
 }
 
@@ -1262,34 +1368,38 @@ function handleSetupResult(
     pushWarningContext(instance)
   }
 
-  if (__DEV__ && !isBlock(setupResult)) {
+  if (!isBlock(setupResult)) {
     if (isFunction(component)) {
-      warn(`Functional vapor component must return a block directly.`)
+      if (__DEV__) {
+        warn(`Functional vapor component must return a block directly.`)
+      }
       instance.block = []
     } else if (!component.render) {
-      warn(
-        `Vapor component setup() returned non-block value, and has no render function.`,
-      )
+      if (__DEV__) {
+        warn(
+          `Vapor component setup() returned non-block value, and has no render function.`,
+        )
+      }
+      // setup either threw or returned a non-block value: fall back to an
+      // empty block so mount / unmount can proceed and the error can
+      // propagate to parent error boundaries
       instance.block = []
     } else {
       if (__DEV__ || __FEATURE_PROD_DEVTOOLS__) {
         instance.devtoolsRawSetupState = setupResult
       }
-      instance.setupState = proxyRefs(setupResult)
       if (__DEV__) {
-        instance.setupState = createDevSetupStateProxy(instance)
+        instance.setupState = createDevSetupStateProxy(proxyRefs(setupResult))
+        devRender(instance)
+      } else {
+        // component has a render function but no setup function
+        // (typically components with only a template and no state)
+        instance.block =
+          callRender(component.render, instance, setupResult) || []
       }
-      devRender(instance)
     }
   } else {
-    // component has a render function but no setup function
-    // (typically components with only a template and no state)
-    if (setupResult === EMPTY_OBJ && component.render) {
-      instance.block = callRender(component.render, instance, setupResult)
-    } else {
-      // in prod result can only be block
-      instance.block = setupResult as Block
-    }
+    instance.block = setupResult as Block
   }
 
   // single root, inherit attrs
@@ -1298,11 +1408,9 @@ function handleSetupResult(
     component.inheritAttrs !== false &&
     Object.keys(instance.attrs).length
   ) {
-    const getFallthroughAttrs =
-      isFunction(component) &&
-      !(isTransitionEnabled ? isVaporTransition(component) : false)
-        ? () => getFunctionalFallthrough(instance.attrs)
-        : () => instance.attrs
+    const getFallthroughAttrs = shouldUseFunctionalFallthrough(component)
+      ? () => getFunctionalFallthrough(instance.attrs)
+      : () => instance.attrs
     // attach attrs to the root element, or to root dynamic fragments so they
     // can be (re-)applied during each branch update
     applyFallthroughAttrs(instance.block, instance, getFallthroughAttrs)

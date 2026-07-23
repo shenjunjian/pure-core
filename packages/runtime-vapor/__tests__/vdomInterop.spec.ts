@@ -3,11 +3,14 @@ import {
   type ShallowRef,
   Suspense,
   Teleport,
+  Transition,
   cloneVNode,
   createApp,
   createCommentVNode,
   createVNode,
+  currentInstance,
   defineComponent,
+  getCurrentScope,
   h,
   inject,
   nextTick,
@@ -15,6 +18,7 @@ import {
   onBeforeMount,
   onBeforeUpdate,
   onDeactivated,
+  onErrorCaptured,
   onMounted,
   onUnmounted,
   onUpdated,
@@ -36,12 +40,7 @@ import { VaporDynamicComponentFlags, VaporSlotFlags } from '@vue/shared'
 import { VaporSlot } from '../../runtime-core/src/vnode'
 import { compile, makeInteropRender } from './_utils'
 import {
-  insertionAnchor,
-  insertionIndex,
-  insertionParent,
-  resetInsertionState,
-} from '../src/insertionState'
-import {
+  type VaporComponentInstance,
   VaporKeepAlive,
   VaporTeleport,
   applyTextModel,
@@ -58,11 +57,11 @@ import {
   defineVaporComponent,
   insert,
   renderEffect,
-  setInsertionState,
   setText,
   template,
   txt,
   vaporInteropPlugin,
+  withAsyncContext,
 } from '../src'
 
 const define = makeInteropRender()
@@ -338,6 +337,30 @@ describe('vdomInterop', () => {
       }).render()
 
       expect(html()).toBe('<div class="foo bar"></div>')
+    })
+
+    test('should warn on invalid prop when vapor renders vdom component', async () => {
+      const base = ref<unknown>('invalid')
+      const VDomChild = defineComponent({
+        props: {
+          base: Number,
+        },
+        render: () => h('div'),
+      })
+
+      const VaporChild = defineVaporComponent(() =>
+        createComponent(VDomChild as any, {
+          base: () => base.value,
+        }),
+      )
+
+      define(() => h(VaporChild as any)).render()
+
+      expect('type check failed for prop "base"').toHaveBeenWarnedTimes(1)
+
+      base.value = 'still invalid'
+      await nextTick()
+      expect('type check failed for prop "base"').toHaveBeenWarnedTimes(2)
     })
 
     test('should not pass reserved props into vapor attrs on update', async () => {
@@ -724,6 +747,60 @@ describe('vdomInterop', () => {
       expect(html()).toBe('<div style=""></div>')
     })
 
+    test('apply v-show transition to vdom child', async () => {
+      let finishLeave: (() => void) | undefined
+      const onBeforeEnter = vi.fn()
+      const onEnter = vi.fn((_el: Element, done: () => void) => done())
+      const onLeave = vi.fn((_el: Element, done: () => void) => {
+        finishLeave = done
+      })
+      const data = ref({
+        show: true,
+        onBeforeEnter,
+        onEnter,
+        onLeave,
+      })
+      const VDomChild = compile(
+        `<script setup>const text = 'Comp text'</script><template><div>{{ text }}</div></template>`,
+        data,
+        {},
+        { vapor: false },
+      )
+      const App = compile(
+        `<template>
+          <Transition
+            :css="false"
+            @before-enter="data.onBeforeEnter"
+            @enter="data.onEnter"
+            @leave="data.onLeave"
+          >
+            <components.VDomChild v-show="data.show" />
+          </Transition>
+        </template>`,
+        data,
+        { VDomChild },
+      )
+      const { host } = define(App as any).render()
+      document.body.appendChild(host)
+      const el = host.querySelector('div')!
+
+      data.value.show = false
+      await nextTick()
+
+      expect(onLeave).toHaveBeenCalledOnce()
+      expect(el.style.display).toBe('')
+
+      finishLeave!()
+      expect(el.style.display).toBe('none')
+
+      data.value.show = true
+      await nextTick()
+
+      expect(onBeforeEnter).toHaveBeenCalledOnce()
+      expect(onEnter).toHaveBeenCalledOnce()
+      expect(el.style.display).toBe('')
+    })
+
     test('apply v-show to vapor child', async () => {
       const VaporChild = defineVaporComponent({
         setup() {
@@ -1026,375 +1103,6 @@ describe('vdomInterop', () => {
       }).render()
 
       expect(html()).toBe('<div>default slot</div>')
-    })
-
-    test('collects compiled vdom component vnodes without hydrating vapor slot content', () => {
-      const data = ref({})
-      const VDomTabs = compile(
-        `<script setup>
-          import { computed, useSlots } from 'vue'
-          const slots = useSlots()
-          const labels = computed(() => {
-            return slots.default?.()
-              .filter(vnode =>
-                typeof vnode.type === 'object' &&
-                vnode.type.__name === 'PluginTabsTab' &&
-                vnode.props
-              )
-              .map(vnode => vnode.props.label) || []
-          })
-        </script>
-        <template>
-          <div>
-            <div class="tabs">
-              <button v-for="label in labels" :key="label">{{ label }}</button>
-            </div>
-            <slot />
-          </div>
-        </template>`,
-        data,
-        {},
-        { vapor: false },
-      )
-      const VDomTab = compile(
-        `<script setup>
-          defineOptions({ __name: 'PluginTabsTab' })
-          defineProps({ label: String })
-        </script>
-        <template>
-          <div class="panel"><slot /></div>
-        </template>`,
-        data,
-        {},
-        { vapor: false },
-      )
-
-      const VaporChild = compile(
-        `<script vapor>const components = _components</script>
-        <template>
-          <components.VDomTabs>
-            <components.VDomTab label="Playwright">
-              <p>Playwright panel</p>
-            </components.VDomTab>
-            <components.VDomTab label="WebdriverIO">
-              <p>WebdriverIO panel</p>
-            </components.VDomTab>
-          </components.VDomTabs>
-        </template>`,
-        data,
-        {
-          VDomTabs,
-          VDomTab,
-        },
-      )
-
-      const { html } = define({
-        setup() {
-          return () => h(VaporChild as any)
-        },
-      }).render()
-
-      expect(html()).toMatchInlineSnapshot(
-        `"<div><div class="tabs"><button>Playwright</button><button>WebdriverIO</button></div><div class="panel"><p>Playwright panel</p></div><div class="panel"><p>WebdriverIO panel</p></div></div>"`,
-      )
-    })
-
-    test('reuses dry-collected vdom slot vnodes for direct rendering and updates', async () => {
-      const data = ref({
-        first: 'Playwright',
-        second: 'WebdriverIO',
-      })
-      const VDomTabs = defineComponent({
-        setup(_, { slots }) {
-          return () => {
-            const children = slots.default?.() || []
-            const labels = children
-              .filter(
-                (vnode: any) =>
-                  typeof vnode.type === 'object' &&
-                  vnode.type.__name === 'PluginTabsTab' &&
-                  vnode.props,
-              )
-              .map((vnode: any) => vnode.props.label)
-            return h('div', [
-              h(
-                'div',
-                { class: 'tabs' },
-                labels.map(label => h('button', { key: label }, label)),
-              ),
-              ...children,
-            ])
-          }
-        },
-      })
-      const VDomTab = compile(
-        `<script setup>
-          defineOptions({ __name: 'PluginTabsTab' })
-          defineProps({ label: String })
-        </script>
-        <template>
-          <div class="panel"><slot /></div>
-        </template>`,
-        data,
-        {},
-        { vapor: false },
-      )
-
-      const VaporChild = compile(
-        `<script vapor>
-          const data = _data
-          const components = _components
-        </script>
-        <template>
-          <components.VDomTabs>
-            <components.VDomTab :label="data.first" :data-test="data.first">
-              <p>{{ data.first }} panel</p>
-            </components.VDomTab>
-            <components.VDomTab :label="data.second" :data-test="data.second">
-              <p>{{ data.second }} panel</p>
-            </components.VDomTab>
-          </components.VDomTabs>
-        </template>`,
-        data,
-        {
-          VDomTabs,
-          VDomTab,
-        },
-      )
-
-      const { html } = define({
-        setup() {
-          return () => h(VaporChild as any)
-        },
-      }).render()
-
-      expect(html()).toMatchInlineSnapshot(
-        `"<div><div class="tabs"><button>Playwright</button><button>WebdriverIO</button></div><div class="panel" data-test="Playwright"><p>Playwright panel</p></div><div class="panel" data-test="WebdriverIO"><p>WebdriverIO panel</p></div></div>"`,
-      )
-
-      data.value = {
-        first: 'Vitest',
-        second: 'Cypress',
-      }
-      await nextTick()
-
-      expect(html()).toMatchInlineSnapshot(
-        `"<div><div class="tabs"><button>Vitest</button><button>Cypress</button></div><div class="panel" data-test="Vitest"><p>Vitest panel</p></div><div class="panel" data-test="Cypress"><p>Cypress panel</p></div></div>"`,
-      )
-    })
-
-    test('collects scoped vapor slot vnodes for direct rendering and updates', async () => {
-      const data = ref({
-        first: 'Playwright',
-        second: 'WebdriverIO',
-      })
-      const VDomTabs = defineComponent({
-        setup(_, { slots }) {
-          return () => {
-            const children = slots.default?.({ prefix: 'V-' }) || []
-            const labels = children
-              .filter(
-                (vnode: any) =>
-                  typeof vnode.type === 'object' &&
-                  vnode.type.__name === 'PluginTabsTab' &&
-                  vnode.props,
-              )
-              .map((vnode: any) => vnode.props.label)
-            return h('div', [
-              h(
-                'div',
-                { class: 'tabs' },
-                labels.map(label => h('button', { key: label }, label)),
-              ),
-              ...children,
-            ])
-          }
-        },
-      })
-      const VDomTab = compile(
-        `<script setup>
-          defineOptions({ __name: 'PluginTabsTab' })
-          defineProps({ label: String })
-        </script>
-        <template>
-          <div class="panel"><slot /></div>
-        </template>`,
-        data,
-        {},
-        { vapor: false },
-      )
-
-      const VaporChild = compile(
-        `<script vapor>
-          const data = _data
-          const components = _components
-        </script>
-        <template>
-          <components.VDomTabs v-slot="{ prefix }">
-            <components.VDomTab :label="prefix + data.first">
-              <p>{{ prefix + data.first }} panel</p>
-            </components.VDomTab>
-            <components.VDomTab :label="prefix + data.second">
-              <p>{{ prefix + data.second }} panel</p>
-            </components.VDomTab>
-          </components.VDomTabs>
-        </template>`,
-        data,
-        {
-          VDomTabs,
-          VDomTab,
-        },
-      )
-
-      const { html } = define({
-        setup() {
-          return () => h(VaporChild as any)
-        },
-      }).render()
-
-      expect(html()).toMatchInlineSnapshot(
-        `"<div><div class="tabs"><button>V-Playwright</button><button>V-WebdriverIO</button></div><div class="panel"><p>V-Playwright panel</p></div><div class="panel"><p>V-WebdriverIO panel</p></div></div>"`,
-      )
-
-      data.value = {
-        first: 'Vitest',
-        second: 'Cypress',
-      }
-      await nextTick()
-
-      expect(html()).toMatchInlineSnapshot(
-        `"<div><div class="tabs"><button>V-Vitest</button><button>V-Cypress</button></div><div class="panel"><p>V-Vitest panel</p></div><div class="panel"><p>V-Cypress panel</p></div></div>"`,
-      )
-    })
-
-    test('falls back to renderable slot vnode for plain vapor slot content', async () => {
-      const data = ref('foo')
-      const VDomCollector = defineComponent({
-        setup(_, { slots }) {
-          return () => {
-            const children = slots.default?.() || []
-            return h('div', [h('span', String(children.length)), ...children])
-          }
-        },
-      })
-
-      const VaporChild = compile(
-        `<script vapor>
-          const data = _data
-          const components = _components
-        </script>
-        <template>
-          <components.VDomCollector>
-            <p>{{ data }}</p>
-          </components.VDomCollector>
-        </template>`,
-        data,
-        { VDomCollector },
-      )
-
-      const { html } = define({
-        setup() {
-          return () => h(VaporChild as any)
-        },
-      }).render()
-
-      expect(html()).toBe('<div><span>1</span><p>foo</p></div>')
-
-      data.value = 'bar'
-      await nextTick()
-
-      expect(html()).toBe('<div><span>1</span><p>bar</p></div>')
-    })
-
-    test('falls back to renderable slot vnode for forwarded vapor slot content', async () => {
-      const data = ref('foo')
-      const VDomCollector = defineComponent({
-        setup(_, { slots }) {
-          return () => {
-            const children = slots.default?.() || []
-            return h('div', [h('span', String(children.length)), ...children])
-          }
-        },
-      })
-      const Forwarder = compile(`<template><slot /></template>`, data)
-
-      const VaporChild = compile(
-        `<script vapor>
-          const data = _data
-          const components = _components
-        </script>
-        <template>
-          <components.VDomCollector>
-            <components.Forwarder>
-              <p>{{ data }}</p>
-            </components.Forwarder>
-          </components.VDomCollector>
-        </template>`,
-        data,
-        {
-          VDomCollector,
-          Forwarder,
-        },
-      )
-
-      const { html } = define({
-        setup() {
-          return () => h(VaporChild as any)
-        },
-      }).render()
-
-      expect(html()).toBe('<div><span>1</span><p>foo</p><!--slot--></div>')
-
-      data.value = 'bar'
-      await nextTick()
-
-      expect(html()).toBe('<div><span>1</span><p>bar</p><!--slot--></div>')
-    })
-
-    test('falls back to renderable slot vnode for vapor component slot content', async () => {
-      const data = ref('foo')
-      const VDomCollector = defineComponent({
-        setup(_, { slots }) {
-          return () => {
-            const children = slots.default?.() || []
-            return h('div', [h('span', String(children.length)), ...children])
-          }
-        },
-      })
-      const VaporPanel = compile(
-        `<script vapor>const data = _data</script>
-        <template><p>{{ data }}</p></template>`,
-        data,
-      )
-
-      const VaporChild = compile(
-        `<script vapor>
-          const components = _components
-        </script>
-        <template>
-          <components.VDomCollector>
-            <components.VaporPanel />
-          </components.VDomCollector>
-        </template>`,
-        data,
-        {
-          VDomCollector,
-          VaporPanel,
-        },
-      )
-
-      const { html } = define({
-        setup() {
-          return () => h(VaporChild as any)
-        },
-      }).render()
-
-      expect(html()).toBe('<div><span>1</span><p>foo</p></div>')
-
-      data.value = 'bar'
-      await nextTick()
-
-      expect(html()).toBe('<div><span>1</span><p>bar</p></div>')
     })
 
     test('normalizes raw VDOM slot function values passed to Vapor', async () => {
@@ -2077,128 +1785,6 @@ describe('vdomInterop', () => {
       }).render()
 
       expect(html()).toBe('<div>direct call slot</div>')
-    })
-
-    test('slots.default() direct invocation should preserve active insertion state', () => {
-      let capturedSlot: (() => any[]) | undefined
-
-      const VDomChild = defineComponent({
-        setup(_, { slots }) {
-          capturedSlot = slots.default
-          return () => h('div', null, renderSlot(slots, 'default'))
-        },
-      })
-
-      const VaporChild = defineVaporComponent({
-        setup() {
-          return createComponent(
-            VDomChild as any,
-            null,
-            {
-              default: () => template('direct call slot')(),
-            },
-            true,
-          )
-        },
-      })
-
-      const { html } = define({
-        setup() {
-          return () => h(VaporChild as any)
-        },
-      }).render()
-
-      expect(html()).toBe('<div>direct call slot</div>')
-
-      const sentinelParent = document.createElement('div') as any
-      const sentinelAnchor = document.createComment('anchor')
-      sentinelParent.appendChild(sentinelAnchor)
-
-      try {
-        setInsertionState(sentinelParent, sentinelAnchor, 3)
-
-        const preview = capturedSlot!()
-
-        expect(preview).toHaveLength(1)
-        expect(sentinelParent.innerHTML).toBe('<!--anchor-->')
-        expect(insertionParent).toBe(sentinelParent)
-        expect(insertionAnchor).toBe(sentinelAnchor)
-        expect(insertionIndex).toBe(3)
-      } finally {
-        resetInsertionState()
-      }
-    })
-
-    test('slots.default() direct invocation outside render keeps slot owner appContext', async () => {
-      const data = ref({
-        first: 'Playwright',
-        second: 'WebdriverIO',
-      })
-      let capturedSlot: (() => any[]) | undefined
-
-      const VDomTabs = defineComponent({
-        setup(_, { slots }) {
-          capturedSlot = slots.default
-          return () => h('div', null, renderSlot(slots, 'default'))
-        },
-      })
-      const VDomTab = compile(
-        `<script setup>
-          defineOptions({ __name: 'PluginTabsTab' })
-          defineProps({ label: String })
-        </script>
-        <template>
-          <div class="panel"><slot /></div>
-        </template>`,
-        data,
-        {},
-        { vapor: false },
-      )
-
-      const VaporChild = compile(
-        `<script vapor>
-          const data = _data
-          const components = _components
-        </script>
-        <template>
-          <components.VDomTabs>
-            <components.VDomTab :label="data.first">
-              <p>{{ data.first }} panel</p>
-            </components.VDomTab>
-            <components.VDomTab :label="data.second">
-              <p>{{ data.second }} panel</p>
-            </components.VDomTab>
-          </components.VDomTabs>
-        </template>`,
-        data,
-        {
-          VDomTabs,
-          VDomTab,
-        },
-      )
-
-      const { html } = define({
-        setup() {
-          return () => h(VaporChild as any)
-        },
-      }).render()
-
-      expect(html()).toBe(
-        '<div><div class="panel"><p>Playwright panel</p></div><div class="panel"><p>WebdriverIO panel</p></div></div>',
-      )
-
-      const getLabels = () =>
-        (capturedSlot!() || []).map((vnode: any) => vnode.props?.label)
-
-      expect(getLabels()).toEqual(['Playwright', 'WebdriverIO'])
-
-      data.value = {
-        first: 'Vitest',
-        second: 'Cypress',
-      }
-      await nextTick()
-
-      expect(getLabels()).toEqual(['Vitest', 'Cypress'])
     })
 
     test('slots.default() delayed by VDOM child should not warn when vapor slot contains v-for', async () => {
@@ -4580,6 +4166,286 @@ describe('vdomInterop', () => {
   })
 
   describe('Suspense', () => {
+    function deferred() {
+      let resolve!: () => void
+      const promise = new Promise<void>(r => (resolve = r))
+      return { promise, resolve }
+    }
+
+    async function flushResolution(promise: Promise<void>) {
+      await promise
+      await Promise.resolve()
+      await nextTick()
+      await nextTick()
+    }
+
+    test('preserves source order when an async vapor child precedes a dynamic sibling', async () => {
+      const pending = deferred()
+      const Tail = compile(`<template><i>tail</i></template>`, ref(null))
+      const data = ref({ wait: pending.promise, current: Tail })
+      const AsyncChild = compile(
+        `<script vapor>
+          const data = _data
+          await data.value.wait
+        </script>
+        <template><span>async</span></template>`,
+        data,
+      )
+      const VaporParent = compile(
+        `<template>
+          <div>
+            <components.AsyncChild />
+            <component :is="data.current" />
+          </div>
+        </template>`,
+        data,
+        { AsyncChild },
+      )
+      const host = document.createElement('div')
+      const app = createApp({
+        render: () =>
+          h(Suspense, null, {
+            default: () => h(VaporParent),
+            fallback: () => h('p', 'pending'),
+          }),
+      })
+      app.use(vaporInteropPlugin)
+
+      try {
+        app.mount(host)
+        expect(host.innerHTML).toBe('<p>pending</p>')
+
+        pending.resolve()
+        await flushResolution(pending.promise)
+
+        expect(host.innerHTML).toBe(
+          '<div><span>async</span><i>tail</i><!--dynamic-component--></div>',
+        )
+      } finally {
+        app.unmount()
+        host.remove()
+      }
+    })
+
+    test('uses the live placeholder after a directive removes the old insertion anchor', async () => {
+      const pending = deferred()
+      const data = ref({ wait: pending.promise })
+      const AsyncChild = compile(
+        `<script vapor>
+          const data = _data
+          await data.value.wait
+        </script>
+        <template><span>async</span></template>`,
+        data,
+      )
+      const VaporParent = compile(
+        `<template>
+          <div>
+            <components.AsyncChild />
+            <span v-remove>tail</span>
+          </div>
+        </template>`,
+        data,
+        { AsyncChild },
+      )
+      const host = document.createElement('div')
+      const errorHandler = vi.fn()
+      const remove = vi.fn((el: Element) => el.remove())
+      const app = createApp({
+        render: () =>
+          h(Suspense, null, {
+            default: () => h(VaporParent),
+            fallback: () => h('p', 'pending'),
+          }),
+      })
+      app.use(vaporInteropPlugin)
+      app.directive('remove', remove)
+      app.config.errorHandler = errorHandler
+
+      try {
+        app.mount(host)
+        expect(host.innerHTML).toBe('<p>pending</p>')
+        expect(remove).toHaveBeenCalledOnce()
+
+        pending.resolve()
+        await flushResolution(pending.promise)
+
+        expect(errorHandler).not.toHaveBeenCalled()
+        expect(host.innerHTML).toBe('<div><span>async</span></div>')
+      } finally {
+        app.unmount()
+        host.remove()
+      }
+    })
+
+    test('removes a pending async placeholder when its VDOM parent unmounts', async () => {
+      const pending = deferred()
+      const data = ref({ wait: pending.promise })
+      let instance!: VaporComponentInstance
+      const AsyncChild = compile(
+        `<script vapor>
+          const data = _data
+          await data.value.wait
+        </script>
+        <template><span>async</span></template>`,
+        data,
+      )
+      const setup = AsyncChild.setup
+      AsyncChild.setup = (props: any, child: VaporComponentInstance) => {
+        instance = child
+        return setup(props, child)
+      }
+      const host = document.createElement('div')
+      const errorHandler = vi.fn()
+      const app = createApp({
+        render: () =>
+          h(Suspense, null, {
+            default: () => h('div', [h(AsyncChild)]),
+            fallback: () => h('p', 'pending'),
+          }),
+      })
+      app.use(vaporInteropPlugin)
+      app.config.errorHandler = errorHandler
+      let mounted = false
+
+      try {
+        app.mount(host)
+        mounted = true
+        const placeholder = instance.block as Node
+        expect(placeholder).toBeInstanceOf(Comment)
+
+        app.unmount()
+        mounted = false
+
+        expect(placeholder.parentNode).toBeNull()
+
+        pending.resolve()
+        await flushResolution(pending.promise)
+        expect(errorHandler).not.toHaveBeenCalled()
+        expect(host.innerHTML).toBe('')
+      } finally {
+        pending.resolve()
+        if (mounted) app.unmount()
+        host.remove()
+      }
+    })
+
+    test('removes a pending async placeholder disposed through its vapor parent scope', async () => {
+      const pending = deferred()
+      const data = ref({ wait: pending.promise })
+      let instance!: VaporComponentInstance
+      const AsyncChild = compile(
+        `<script vapor>
+          const data = _data
+          await data.value.wait
+        </script>
+        <template><span>async</span></template>`,
+        data,
+      )
+      const setup = AsyncChild.setup
+      AsyncChild.setup = (props: any, child: VaporComponentInstance) => {
+        instance = child
+        return setup(props, child)
+      }
+      const VaporParent = compile(
+        `<template><div><components.AsyncChild /><i>tail</i></div></template>`,
+        data,
+        { AsyncChild },
+      )
+      const host = document.createElement('div')
+      const app = createApp({
+        render: () =>
+          h(Suspense, null, {
+            default: () => h(VaporParent),
+            fallback: () => h('p', 'pending'),
+          }),
+      })
+      app.use(vaporInteropPlugin)
+      let mounted = false
+
+      try {
+        app.mount(host)
+        mounted = true
+        const placeholder = instance.block as Node
+        expect(placeholder.parentNode).not.toBeNull()
+
+        app.unmount()
+        mounted = false
+
+        expect(placeholder.parentNode).toBeNull()
+      } finally {
+        if (mounted) app.unmount()
+        pending.resolve()
+        await flushResolution(pending.promise)
+        host.remove()
+      }
+    })
+
+    test('first-mounts a pending async component re-entered from KeepAlive cache', async () => {
+      const pending = deferred()
+      const data = ref({ wait: pending.promise })
+      let instance!: VaporComponentInstance
+      let setupCalls = 0
+      const AsyncChild = compile(
+        `<script vapor>
+          const data = _data
+          await data.value.wait
+        </script>
+        <template><span>async</span></template>`,
+        data,
+      )
+      const setup = AsyncChild.setup
+      AsyncChild.setup = (props: any, child: VaporComponentInstance) => {
+        setupCalls++
+        instance = child
+        return setup(props, child)
+      }
+      const SyncChild = defineVaporComponent({
+        setup: () => template('<span>sync</span>')(),
+      })
+      const current = shallowRef<any>(SyncChild)
+      const VaporParent = defineVaporComponent({
+        setup() {
+          return createComponent(VaporKeepAlive, null, {
+            default: () => createDynamicComponent(() => current.value),
+          })
+        },
+      })
+      const host = document.createElement('div')
+      const app = createApp({
+        render: () =>
+          h(Suspense, null, {
+            default: () => h(VaporParent),
+            fallback: () => h('p', 'pending'),
+          }),
+      })
+      app.use(vaporInteropPlugin)
+
+      try {
+        app.mount(host)
+        current.value = AsyncChild
+        await nextTick()
+        current.value = SyncChild
+        await nextTick()
+        current.value = AsyncChild
+        await nextTick()
+
+        expect(setupCalls).toBe(1)
+        expect(instance.isDeactivated).toBe(false)
+        pending.resolve()
+        await flushResolution(pending.promise)
+
+        expect(instance.isMounted).toBe(true)
+        expect(host.innerHTML).toBe(
+          '<span>async</span><!--dynamic-component-->',
+        )
+      } finally {
+        pending.resolve()
+        app.unmount()
+        host.remove()
+      }
+    })
+
     test('renders vapor async wrapper inside VDOM Suspense', async () => {
       const duration = 5
 
@@ -4879,6 +4745,52 @@ describe('vdomInterop', () => {
       ).not.toHaveBeenWarned()
     })
 
+    test('render effects created in render() after async setup are owned by the instance', async () => {
+      const duration = 5
+      const msg = ref('pending')
+      let instanceInRender: any
+
+      const VaporAsyncChild = defineVaporComponent({
+        async setup() {
+          let __temp: any, __restore: any
+          ;(([__temp, __restore] = withAsyncContext(
+            () => new Promise(resolve => setTimeout(resolve, duration)),
+          )),
+            (__temp = await __temp),
+            __restore())
+          return { msg }
+        },
+        render(_ctx: any) {
+          instanceInRender = currentInstance
+          const n = template('<div> </div>')()
+          const x = child(n as any) as any
+          renderEffect(() => setText(x, toDisplayString(_ctx.msg)))
+          return n
+        },
+      })
+
+      const { html } = define({
+        render() {
+          return h(Suspense as any, null, {
+            default: () => h(VaporAsyncChild as any),
+            fallback: () => h('span', 'loading'),
+          })
+        },
+      }).render()
+
+      expect(html()).toContain('<span>loading</span>')
+
+      await new Promise(resolve => setTimeout(resolve, duration + 1))
+      await nextTick()
+
+      expect(html()).toContain('<div>pending</div>')
+      expect(instanceInRender).not.toBe(null)
+
+      msg.value = 'updated'
+      await nextTick()
+      expect(html()).toContain('<div>updated</div>')
+    })
+
     test('renders async VDOM child inside VDOM Suspense', async () => {
       const duration = 5
 
@@ -5024,6 +4936,109 @@ describe('vdomInterop', () => {
 
       await nextTick()
       expect(html()).toContain('<span>resolved</span>')
+    })
+
+    test('mounted/activated hooks defer to the owning suspense boundary', async () => {
+      const timeout = (n = 0) => new Promise(r => setTimeout(r, n))
+      const order: string[] = []
+
+      const VaporChild = defineVaporComponent({
+        setup() {
+          onMounted(() => order.push('vapor mounted'))
+          return template('<div>vapor</div>', 1)()
+        },
+      })
+
+      const AsyncSibling = defineComponent({
+        async setup() {
+          await timeout(5)
+          return () => h('span', 'async')
+        },
+      })
+
+      const { html } = define({
+        setup() {
+          return () =>
+            h(
+              Suspense,
+              { onResolve: () => order.push('suspense resolved') },
+              {
+                default: () =>
+                  h('div', [h(VaporChild as any), h(AsyncSibling)]),
+                fallback: () => h('span', 'loading'),
+              },
+            )
+        },
+      }).render()
+
+      await timeout(20)
+      await nextTick()
+
+      expect(html()).toContain('<div>vapor</div>')
+      expect(order).toEqual(['suspense resolved', 'vapor mounted'])
+    })
+  })
+
+  describe('current scope', () => {
+    test('does not leak active scope after mounting sync-setup vapor child', () => {
+      const VaporChild = defineVaporComponent({
+        setup() {
+          return template('<div>vapor</div>')()
+        },
+      })
+
+      const host = document.createElement('div')
+      const app = createApp({
+        render: () => h(VaporChild as any),
+      })
+      app.use(vaporInteropPlugin)
+      app.mount(host)
+
+      expect(getCurrentScope()).toBeUndefined()
+    })
+
+    test('vapor component mounted via Suspense branch swap is not unmounted on resolve', async () => {
+      const unmounted = vi.fn()
+
+      const VaporChild = defineVaporComponent({
+        setup() {
+          return template('<span>sync vapor</span>')()
+        },
+      })
+
+      const Page1 = defineComponent({
+        setup() {
+          return () => h('div', [h(VaporChild as any)])
+        },
+      })
+
+      const VaporPage2 = defineVaporComponent({
+        async setup() {
+          onUnmounted(unmounted)
+          return template('<div>page 2</div>')()
+        },
+      })
+
+      const current = shallowRef<any>(Page1)
+      const host = document.createElement('div')
+      const app = createApp({
+        render: () =>
+          h(Suspense, null, {
+            default: () => h(current.value),
+          }),
+      })
+      app.use(vaporInteropPlugin)
+      app.mount(host)
+      await nextTick()
+      expect(host.innerHTML).toContain('sync vapor')
+
+      current.value = VaporPage2
+      await nextTick()
+      await new Promise(resolve => setTimeout(resolve))
+      await nextTick()
+
+      expect(host.innerHTML).toContain('page 2')
+      expect(unmounted).not.toHaveBeenCalled()
     })
   })
 
@@ -5176,6 +5191,348 @@ describe('vdomInterop', () => {
         'component updated',
         'vnode updated',
       ])
+    })
+  })
+
+  describe('transition', () => {
+    const timeout = (n = 0) => new Promise(r => setTimeout(r, n))
+
+    const makeHooks = () => {
+      let finishLeave: (() => void) | undefined
+      return {
+        onLeave: vi.fn((_el: Element, done: () => void) => {
+          finishLeave = done
+        }),
+        onEnter: vi.fn((_el: Element, done: () => void) => done()),
+        onBeforeEnter: vi.fn(),
+        onAfterEnter: vi.fn(),
+        finishLeave: () => {
+          finishLeave!()
+          finishLeave = undefined
+        },
+      }
+    }
+
+    test('out-in + suspense: leaving async vapor component resolves leave and mounts next branch', async () => {
+      const hooks = makeHooks()
+      const VaporChild = defineVaporComponent({
+        async setup() {
+          await timeout()
+          return template('<div>vapor</div>', 1)()
+        },
+      })
+      const VdomChild = { setup: () => () => h('div', 'vdom') }
+      const current = shallowRef<any>(VaporChild)
+      const { host, html } = define({
+        setup() {
+          return () =>
+            h(
+              Transition,
+              {
+                mode: 'out-in',
+                css: false,
+                onLeave: hooks.onLeave,
+                onEnter: hooks.onEnter,
+              },
+              {
+                default: () =>
+                  h(Suspense, null, {
+                    default: () =>
+                      h(current.value, {
+                        key: current.value === VaporChild ? 'a' : 'b',
+                      }),
+                  }),
+              },
+            )
+        },
+      }).render()
+      document.body.appendChild(host)
+
+      await timeout(10)
+      expect(html()).toContain('vapor')
+
+      current.value = VdomChild
+      await timeout(10)
+      expect(hooks.onLeave).toHaveBeenCalledTimes(1)
+      expect(html()).toContain('vapor')
+
+      hooks.finishLeave()
+      await timeout(10)
+      expect(html()).toContain('vdom')
+      expect(html()).not.toContain('vapor')
+    })
+
+    test('out-in + suspense: entering vapor component fires enter hooks once', async () => {
+      const hooks = makeHooks()
+      const VaporChild = compile(
+        `<template><!-- ignored root --><div>vapor</div></template>`,
+        ref(null),
+      )
+      const VdomChild = { setup: () => () => h('div', 'vdom') }
+      const current = shallowRef<any>(VdomChild)
+      const { host, html } = define({
+        setup() {
+          return () =>
+            h(
+              Transition,
+              {
+                mode: 'out-in',
+                css: false,
+                onLeave: hooks.onLeave,
+                onEnter: hooks.onEnter,
+                onBeforeEnter: hooks.onBeforeEnter,
+                onAfterEnter: hooks.onAfterEnter,
+              },
+              {
+                default: () =>
+                  h(Suspense, null, {
+                    default: () =>
+                      h(current.value, {
+                        key: current.value === VaporChild ? 'a' : 'b',
+                      }),
+                  }),
+              },
+            )
+        },
+      }).render()
+      document.body.appendChild(host)
+
+      expect(html()).toContain('vdom')
+      current.value = VaporChild
+      await nextTick()
+      expect(hooks.onLeave).toHaveBeenCalledTimes(1)
+      hooks.finishLeave()
+      await nextTick()
+      await nextTick()
+      expect(html()).toContain('vapor')
+      expect(hooks.onBeforeEnter).toHaveBeenCalledTimes(1)
+      expect(hooks.onAfterEnter).toHaveBeenCalledTimes(1)
+    })
+
+    test('out-in + suspense: entering async vapor component fires enter hooks once', async () => {
+      const hooks = makeHooks()
+      const VaporChild = defineVaporComponent({
+        async setup() {
+          await timeout()
+          return template('<div>vapor</div>', 1)()
+        },
+      })
+      const VdomChild = { setup: () => () => h('div', 'vdom') }
+      const current = shallowRef<any>(VdomChild)
+      const { host, html } = define({
+        setup() {
+          return () =>
+            h(
+              Transition,
+              {
+                mode: 'out-in',
+                css: false,
+                onLeave: hooks.onLeave,
+                onEnter: hooks.onEnter,
+                onBeforeEnter: hooks.onBeforeEnter,
+                onAfterEnter: hooks.onAfterEnter,
+              },
+              {
+                default: () =>
+                  h(Suspense, null, {
+                    default: () =>
+                      h(current.value, {
+                        key: current.value === VaporChild ? 'a' : 'b',
+                      }),
+                  }),
+              },
+            )
+        },
+      }).render()
+      document.body.appendChild(host)
+
+      expect(html()).toContain('vdom')
+      current.value = VaporChild
+      await timeout(10)
+      expect(hooks.onLeave).toHaveBeenCalledTimes(1)
+      hooks.finishLeave()
+      await timeout(10)
+      expect(html()).toContain('vapor')
+      expect(hooks.onBeforeEnter).toHaveBeenCalledTimes(1)
+      expect(hooks.onAfterEnter).toHaveBeenCalledTimes(1)
+    })
+
+    test('default mode: leaving vapor component is removed after leave finishes', async () => {
+      const hooks = makeHooks()
+      const VaporChild = defineVaporComponent({
+        async setup() {
+          await timeout()
+          return template('<div>vapor</div>', 1)()
+        },
+      })
+      const VdomChild = { setup: () => () => h('div', 'vdom') }
+      const current = shallowRef<any>(VaporChild)
+      const { host, html } = define({
+        setup() {
+          return () =>
+            h(
+              Transition,
+              { css: false, onLeave: hooks.onLeave },
+              {
+                default: () =>
+                  h(Suspense, null, {
+                    default: () =>
+                      h(current.value, {
+                        key: current.value === VaporChild ? 'a' : 'b',
+                      }),
+                  }),
+              },
+            )
+        },
+      }).render()
+      document.body.appendChild(host)
+
+      await timeout(10)
+      current.value = VdomChild
+      await nextTick()
+      expect(hooks.onLeave).toHaveBeenCalledTimes(1)
+      expect(html()).toContain('vapor')
+      hooks.finishLeave()
+      await nextTick()
+      expect(html()).not.toContain('vapor')
+      expect(html()).toContain('vdom')
+    })
+
+    test('out-in + suspense: leaving vapor branch completes after hooks re-clone', async () => {
+      const hooks = makeHooks()
+      const VaporChild = defineVaporComponent({
+        setup() {
+          return template('<div>vapor</div>', 1)()
+        },
+      })
+      const VdomChild = { setup: () => () => h('div', 'vdom') }
+      const current = shallowRef<any>(VaporChild)
+      const tick = ref(0)
+      const { host, html } = define({
+        setup() {
+          return () => {
+            // reading tick makes a bump re-render the tree, which re-clones the
+            // transition hooks onto the branch vnode (mirrors an intervening
+            // parent render during an async page's resolve window in Nuxt).
+            void tick.value
+            return h(
+              Transition,
+              {
+                mode: 'out-in',
+                css: false,
+                onLeave: hooks.onLeave,
+                onEnter: hooks.onEnter,
+              },
+              {
+                default: () =>
+                  h(Suspense, null, {
+                    default: () =>
+                      h(current.value, {
+                        key: current.value === VaporChild ? 'a' : 'b',
+                      }),
+                  }),
+              },
+            )
+          }
+        },
+      }).render()
+      document.body.appendChild(host)
+
+      await timeout(10)
+      expect(html()).toContain('vapor')
+
+      tick.value++
+      await nextTick()
+
+      current.value = VdomChild
+      await timeout(10)
+      expect(hooks.onLeave).toHaveBeenCalledTimes(1)
+      expect(html()).toContain('vapor')
+
+      hooks.finishLeave()
+      await timeout(10)
+      expect(html()).toContain('vdom')
+      expect(html()).not.toContain('vapor')
+    })
+
+    test('uses latest transition hooks when a vapor root branch switches', async () => {
+      const data = ref({ show: true })
+      const useSecondHook = ref(false)
+      const firstLeave = vi.fn((_el: Element, done: () => void) => done())
+      const secondLeave = vi.fn((_el: Element, done: () => void) => done())
+      const VaporChild = compile(
+        `<template>
+          <div v-if="data.show">first</div>
+          <div v-else>second</div>
+        </template>`,
+        data,
+      )
+      const { html } = define({
+        setup() {
+          return () =>
+            h(
+              Transition,
+              {
+                css: false,
+                onLeave: useSecondHook.value ? secondLeave : firstLeave,
+              },
+              { default: () => h(VaporChild as any) },
+            )
+        },
+      }).render()
+
+      expect(html()).toContain('first')
+
+      useSecondHook.value = true
+      await nextTick()
+
+      data.value.show = false
+      await nextTick()
+
+      expect(firstLeave).not.toHaveBeenCalled()
+      expect(secondLeave).toHaveBeenCalledTimes(1)
+      expect(html()).toContain('second')
+    })
+  })
+
+  describe('error handling', () => {
+    test('vdom parent captures error thrown in vapor child setup', async () => {
+      const err = new Error('foo')
+      const fn = vi.fn()
+      const show = ref(false)
+
+      const VaporChild = defineVaporComponent({
+        setup() {
+          throw err
+        },
+      })
+
+      const Parent = defineComponent({
+        setup() {
+          onErrorCaptured((err, instance, info) => {
+            fn(err, info)
+            return false
+          })
+          return () => (show.value ? h(VaporChild as any) : h('div', 'ok'))
+        },
+      })
+
+      const root = document.createElement('div')
+      const app = createApp(Parent)
+      app.use(vaporInteropPlugin)
+      app.mount(root)
+      expect(root.innerHTML).toBe('<div>ok</div>')
+
+      show.value = true
+      await nextTick()
+      expect(fn).toHaveBeenCalledWith(err, 'setup function')
+
+      show.value = false
+      await nextTick()
+      expect(root.innerHTML).toBe('<div>ok</div>')
+
+      expect(() => app.unmount()).not.toThrow()
+      expect(`returned non-block value`).toHaveBeenWarned()
     })
   })
 })

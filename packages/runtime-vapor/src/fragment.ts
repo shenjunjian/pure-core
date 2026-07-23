@@ -13,10 +13,12 @@ import {
 } from './block'
 import {
   type GenericComponentInstance,
+  type SuspenseBoundary,
   type TransitionHooks,
   type VNode,
   currentInstance,
   queuePostFlushCb,
+  restoreCurrentInstance,
   setCurrentInstance,
 } from '@vue/runtime-dom'
 import type { VaporComponentInstance } from './component'
@@ -82,6 +84,7 @@ export class VaporFragment<
   insert?: (
     parent: ParentNode,
     anchor: Node | null,
+    parentSuspense?: SuspenseBoundary | null,
     transitionHooks?: TransitionHooks,
   ) => void
   remove?: (parent?: ParentNode, transitionHooks?: TransitionHooks) => void
@@ -143,7 +146,7 @@ export function runWithRenderCtx<R>(
   try {
     return runWithFragmentCtxOnly(fragment, fn)
   } finally {
-    setCurrentInstance(...prevInstance)
+    restoreCurrentInstance(prevInstance)
   }
 }
 
@@ -472,7 +475,8 @@ export class SlotFragment
   constructor(private readonly notifyParentBoundary: boolean = false) {
     super(isHydrating || __DEV__ ? 'slot' : undefined, false, false, false)
     if (!isHydrating) {
-      this.insert = (parent, anchor) => this.insertSlot(parent, anchor)
+      this.insert = (parent, anchor, parentSuspense) =>
+        this.insertSlot(parent, anchor, parentSuspense)
     }
     this.remove = parent => this.removeSlot(parent)
   }
@@ -492,9 +496,13 @@ export class SlotFragment
     })
   }
 
-  private insertSlot(parent: ParentNode, anchor: Node | null): void {
+  private insertSlot(
+    parent: ParentNode,
+    anchor: Node | null,
+    parentSuspense?: SuspenseBoundary | null,
+  ): void {
     this.disposed = false
-    insert(this.nodes, parent, anchor)
+    insert(this.nodes, parent, anchor, parentSuspense)
   }
 
   private removeSlot(parent?: ParentNode): void {
@@ -688,6 +696,14 @@ export function isInteropFragment(val: unknown): val is InteropFragment {
 
 export function isDynamicFragment(val: unknown): val is DynamicFragment {
   return !!(val && (val as any).__df)
+}
+
+export function isForFragment(val: unknown): val is ForFragment {
+  return isFragment(val) && typeof (val as ForFragment).onReset === 'function'
+}
+
+export function isForBlock(val: unknown): val is ForBlock {
+  return isFragment(val) && (val as ForBlock).itemRef !== undefined
 }
 
 export function isSlotFragment(val: unknown): val is SlotFragment {

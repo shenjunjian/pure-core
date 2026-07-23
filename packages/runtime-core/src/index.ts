@@ -562,6 +562,7 @@ export {
  */
 export {
   currentInstance,
+  restoreCurrentInstance,
   setCurrentInstance,
   simpleSetCurrentInstance,
 } from './componentCurrentInstance'
@@ -644,6 +645,7 @@ export {
   performTransitionEnter,
   performTransitionLeave,
   invalidateMount,
+  queuePostRenderEffect,
 } from './renderer'
 /**
  * @internal
@@ -663,6 +665,7 @@ export {
   isValidHtmlOrSvgAttribute,
   getAttributeMismatch,
   isHydrating,
+  isHydratingEnabled,
   logMismatchError,
 } from './hydration'
 /**
@@ -694,6 +697,7 @@ export type { GenericComponent } from './component'
 export {
   warnExtraneousAttributes,
   getFunctionalFallthrough,
+  isFunctionalFallthroughKey,
   shouldUpdateComponent,
 } from './componentRenderUtils'
 

@@ -2,6 +2,7 @@ import {
   MismatchTypes,
   isMismatchAllowed,
   isHydrating as isVdomHydrating,
+  isHydratingEnabled as isVdomHydratingEnabled,
   logMismatchError,
   warn,
 } from '@vue/runtime-dom'
@@ -19,6 +20,7 @@ import {
   createTextNode,
   locateChildByLogicalIndex,
   parentNode,
+  updateLastLocatedLogicalChild,
 } from './node'
 import { remove } from '../block'
 
@@ -34,7 +36,9 @@ export let currentHydrationNode: Node | null = null
 
 export let isHydrating = false
 function setIsHydrating(value: boolean) {
-  if (!isHydratingEnabled && !isVdomHydrating) return false
+  if (!isHydratingEnabled && !isVdomHydrating && !isVdomHydratingEnabled) {
+    return false
+  }
   try {
     return isHydrating
   } finally {
@@ -360,10 +364,12 @@ function handleMismatch(
 
   // fast path for text nodes
   if (template[0] !== '<') {
-    return container.insertBefore(
-      markRecreatedNode(createTextNode(template)),
-      next,
-    )
+    const newNode = markRecreatedNode(createTextNode(template))
+    container.insertBefore(newNode, next)
+    if (!shouldPreserveAnchor) {
+      updateLastLocatedLogicalChild(container, node, newNode)
+    }
+    return newNode
   }
 
   // element node
@@ -395,6 +401,9 @@ function handleMismatch(
     }
   }
   container.insertBefore(newNode, next)
+  if (!shouldPreserveAnchor) {
+    updateLastLocatedLogicalChild(container, node, newNode)
+  }
   return newNode
 }
 

@@ -10,13 +10,16 @@ import {
 } from '@vue/shared'
 import type { VaporComponent, VaporComponentInstance } from './component'
 import {
+  type GenericComponentInstance,
   type NormalizedPropsOptions,
+  type VNode,
   baseNormalizePropsOptions,
   currentInstance,
   isEmitListener,
   popWarningContext,
   pushWarningContext,
   resolvePropValue,
+  restoreCurrentInstance,
   setCurrentInstance,
   validateProps,
   warn,
@@ -59,15 +62,22 @@ export function resolveFunctionSource<T>(
   // where source was defined.
   const parent = currentInstance && currentInstance.parent
   if (parent) {
-    source._cache = computed(oldValue => {
-      const prev = setCurrentInstance(parent)
-      try {
-        return stabilizeDynamicSourceValue(oldValue, source())
-      } finally {
-        setCurrentInstance(...prev)
-      }
-    })
-    onScopeDispose(() => (source._cache = undefined))
+    // create the computed in the parent's context so it is collected by the
+    // parent's scope rather than whatever scope happens to be active here
+    const prev = setCurrentInstance(parent)
+    try {
+      source._cache = computed(oldValue => {
+        const prevInner = setCurrentInstance(parent)
+        try {
+          return stabilizeDynamicSourceValue(oldValue, source())
+        } finally {
+          restoreCurrentInstance(prevInner)
+        }
+      })
+      onScopeDispose(() => (source._cache = undefined))
+    } finally {
+      restoreCurrentInstance(prev)
+    }
     return source._cache.value
   }
 
@@ -460,7 +470,7 @@ function resolveDefault(
 ) {
   const prev = setCurrentInstance(instance)
   const res = factory.call(null, instance.props)
-  setCurrentInstance(...prev)
+  restoreCurrentInstance(prev)
   return res
 }
 
@@ -488,11 +498,14 @@ export function hasFallthroughAttrs(
 /**
  * dev only
  */
-export function setupPropsValidation(instance: VaporComponentInstance): void {
+export function setupPropsValidation(
+  instance: VaporComponentInstance,
+  warningContext: GenericComponentInstance | VNode = instance,
+): void {
   const rawProps = instance.rawProps
   if (!rawProps) return
   renderEffect(() => {
-    pushWarningContext(instance)
+    pushWarningContext(warningContext)
     validateProps(
       resolveDynamicProps(rawProps),
       instance.props,
