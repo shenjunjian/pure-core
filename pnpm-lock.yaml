@@ -422,6 +422,12 @@ importers:
       '@vue/reactivity':
         specifier: workspace:*
         version: link:../reactivity
+      '@vue/runtime-dom':
+        specifier: workspace:*
+        version: link:../runtime-dom
+      '@vue/runtime-vapor':
+        specifier: workspace:*
+        version: link:../runtime-vapor
       '@vue/server-renderer':
         specifier: workspace:*
         version: link:../server-renderer

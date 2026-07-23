@@ -88,6 +88,12 @@ const Comp = defineVaporComponent({
 | Vapor 互操作 | `vaporInteropPlugin` 已导出为空实现（仅返回 app），无 VDOM 互操作能力 |
 | Devtools / compat | `devtools`、`compatUtils`、… |
 
+### `v-memo`（编译器静默忽略）
+
+官方 Vapor **不支持** `v-memo`（Feature Compatibility / on hold）。`compiler-vapor` 无 memo transform：指令名在 `isBuiltInDirective` 中（避免当自定义指令），模板中的 `v-memo` 被静默丢弃，运行时无 `withMemo`。
+
+VDOM 的 `v-memo` 用于依赖不变时跳过整棵 VNode 子树 patch；Vapor 由细粒度 `_renderEffect` 按实际读取的依赖更新，该主场景已被覆盖，再做依赖数组级整树 memo 意义不大。需要静态快照用 `v-once`。
+
 使用 `<Suspense>` 的模板仍可被 `compiler-vapor` 生成对应 import，但本包不导出 `Suspense`，应用层需避免。
 
 `<transition>` / `<TransitionGroup>` / `<KeepAlive>` / `<Teleport>` 已支持：编译器生成对应 Vapor 内置 import，本包已导出。

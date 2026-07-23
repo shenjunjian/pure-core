@@ -7,21 +7,12 @@ import ChildRenderB from "../components/demo/ChildRenderB.vue";
 const message = ref("Hello Vapor");
 const htmlContent = ref("<em>v-html 渲染</em>");
 const counter = ref(0);
-const memoDep = ref(0);
 const showA = ref(true);
 
 const components = { A: ChildRenderA, B: ChildRenderB };
 const currentComp = computed(() => (showA.value ? components.A : components.B));
 
 const inputRef = useTemplateRef<HTMLInputElement>("focusInput");
-
-const memoItems = computed(() =>
-  Array.from({ length: 8 }, (_, i) => ({
-    id: i,
-    label: `Item ${i}`,
-    highlight: i % 3 === memoDep.value % 3,
-  })),
-);
 
 function focusInput() {
   inputRef.value?.focus();
@@ -32,7 +23,7 @@ function focusInput() {
   <div class="view-page">
     <h1>渲染</h1>
     <p class="view-desc">
-      插值、v-text、v-html、多根节点、动态组件、v-once、v-memo、useTemplateRef
+      插值、v-text、v-html、多根节点、动态组件、v-once、useTemplateRef
     </p>
 
     <DemoCard
@@ -87,30 +78,6 @@ function focusInput() {
     </DemoCard>
 
     <DemoCard
-      title="v-memo"
-      :apis="['v-memo']"
-      description="依赖项不变时跳过子树更新，观察高亮项随 memoDep 变化。"
-      expected="切换 memo 依赖时，匹配 id % 3 的项背景高亮；其余项 DOM 复用。"
-    >
-      <div class="demo-controls">
-        <button type="button" class="demo-btn" @click="memoDep++">
-          切换 memo 依赖（{{ memoDep }}）
-        </button>
-      </div>
-      <ul class="memo-list">
-        <li
-          v-for="item in memoItems"
-          :key="item.id"
-          v-memo="[memoDep]"
-          class="memo-list__item"
-          :class="{ 'memo-list__item--highlight': item.highlight }"
-        >
-          {{ item.label }} — highlight={{ item.highlight }}
-        </li>
-      </ul>
-    </DemoCard>
-
-    <DemoCard
       title="useTemplateRef"
       :apis="['useTemplateRef', 'ref']"
       description="组合式 API 获取模板 ref 并聚焦输入框。"
@@ -124,29 +91,6 @@ function focusInput() {
 </template>
 
 <style scoped>
-.memo-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.memo-list__item {
-  padding: 8px 12px;
-  border-radius: 6px;
-  background: var(--code-bg);
-  font-family: var(--mono);
-  font-size: 13px;
-  transition: background 0.2s;
-}
-
-.memo-list__item--highlight {
-  background: #fef08a;
-  color: #713f12;
-}
-
 .style-demo-note {
   margin: 0;
   padding: 8px 12px;

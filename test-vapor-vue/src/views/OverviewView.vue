@@ -7,7 +7,7 @@ const sections = [
   {
     id: "rendering",
     label: "渲染",
-    apis: ["{{ }}", "v-text", "v-html", "Fragment", ":is", "v-once", "v-memo", "useTemplateRef"],
+    apis: ["{{ }}", "v-text", "v-html", "Fragment", ":is", "v-once", "useTemplateRef"],
     status: "supported" as const,
   },
   {
@@ -88,6 +88,11 @@ const unsupported = [
   { api: "vaporInteropPlugin", reason: "VDOM 互操作为空实现" },
   { api: "vue-router", reason: "依赖 VDOM API，与本项目不兼容" },
   { api: "@vue:xxx 元素生命周期", reason: "元素级 Options 生命周期不可用" },
+  {
+    api: "v-memo",
+    reason:
+      "官方不支持；compiler-vapor 静默忽略。细粒度 renderEffect 已按依赖更新，无需整树 memo",
+  },
 ];
 </script>
 

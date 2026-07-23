@@ -50,10 +50,22 @@ const limitations = [
     reason: "元素上的 @vue:mounted 等 Options 风格生命周期钩子不可用。",
     workaround: "在组件内使用 onMounted 等组合式钩子。",
   },
+  {
+    api: "v-memo",
+    category: "内置指令",
+    reason:
+      "官方 Vapor 明确不支持（on hold / Feature Compatibility）。compiler-vapor 无 transformMemo：" +
+      "memo 仅在 isBuiltInDirective 名单中以防被当成自定义指令，编译时静默丢弃，不生成 withMemo。" +
+      "VDOM 的 v-memo 用于跳过整棵 VNode 子树 patch；Vapor 每个绑定由独立 renderEffect 追踪依赖，" +
+      "未读到的依赖变化不会触发更新，该场景已被细粒度更新覆盖，再做依赖数组级整树 memo 意义不大。",
+    workaround:
+      "直接依赖细粒度更新即可；若需一次性静态快照可用 v-once。勿为「验证 memo」写示例——写了也不会生效。",
+  },
 ];
 
 const compilerNotes = [
-  "编译器内置指令：bind, cloak, else-if, else, for, html, if, model, on, once, pre, show, slot, text, memo",
+  "编译器内置指令名（isBuiltInDirective）：bind, cloak, else-if, else, for, html, if, model, on, once, pre, show, slot, text, memo —— 名单含 memo 不等于已实现",
+  "v-memo：官方不支持；编译静默忽略，见上方限制说明",
   "自定义指令需使用 Vapor 接口（watchEffect + cleanup），见「指令」页示例",
   '所有示例组件使用 <script setup lang="ts" vapor> 编译模式',
 ];
