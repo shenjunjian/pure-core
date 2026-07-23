@@ -1,6 +1,6 @@
 {
   "name": "pure-vapor",
-  "version": "3.6.0-beta.18",
+  "version": "3.6.0-rc.2",
   "description": "Pure JavaScript Vapor runtime with only @vue/shared and @vue/reactivity",
   "main": "index.js",
   "type": "module",
@@ -10,11 +10,13 @@
     "dist",
     "compiler-sfc",
     "server-renderer",
-    "jsx-runtime"
+    "jsx-runtime",
+    "jsx.d.ts"
   ],
   "exports": {
     ".": {
-      "default": "./dist/pure-vapor.esm-bundler.js"
+      "default": "./dist/pure-vapor.esm-bundler.js",
+      "types": "./dist/vue.d.mts"
     },
     "./server-renderer": {
       "import": {
@@ -48,6 +50,7 @@
       "import": "./jsx-runtime/index.mjs",
       "require": "./jsx-runtime/index.js"
     },
+    "./jsx": "./jsx.d.ts",
     "./dist/*": "./dist/*",
     "./package.json": "./package.json"
   },
@@ -78,7 +81,9 @@
     "@vue/shared": "workspace:*",
     "@vue/reactivity": "workspace:*",
     "@vue/compiler-sfc": "workspace:*",
-    "@vue/server-renderer": "workspace:*"
+    "@vue/server-renderer": "workspace:*",
+    "@vue/runtime-dom": "workspace:*",
+    "@vue/runtime-vapor": "workspace:*"
   },
   "devDependencies": {
     "@vue/compiler-dom": "workspace:*",

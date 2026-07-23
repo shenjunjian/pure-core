@@ -7,7 +7,7 @@
     "dev": "node scripts/dev.js --format esm-bundler",
     "devv": "node scripts/build.js pure-vapor -f esm-bundler &&  vp dev packages-private/vapor-e2e-test",
     "build": "node scripts/build.js",
-    "buildv": "node scripts/build.js pure-vapor -f esm-bundler",
+    "buildv": "node scripts/build.js pure-vapor",
     "build-dts": "node scripts/build-types.js",
     "clean": "rimraf --glob packages/*/dist temp",
     "size": "run-s \"size-*\" && node scripts/usage-size.js",
