@@ -15,7 +15,11 @@ import {
   isVaporTransition,
   removeBranchWithLeave,
 } from './transition.js'
-import { currentInstance, setCurrentInstance } from '../internal/instance.js'
+import {
+  currentInstance,
+  restoreCurrentInstance,
+  setCurrentInstance,
+} from '../internal/instance.js'
 import { currentSlotOwner, setCurrentSlotOwner } from './componentSlots.js'
 import { isVaporComponent } from './component.js'
 import {
@@ -57,7 +61,7 @@ export class VaporFragment {
       }
       setCurrentSlotBoundary(prevBoundary)
       setCurrentSlotOwner(prevSlotOwner)
-      setCurrentInstance(...prevInstance)
+      restoreCurrentInstance(prevInstance)
     }
   }
 }
@@ -172,7 +176,7 @@ export class DynamicFragment extends VaporFragment {
         wasMounted || !!parent,
       )
     } finally {
-      setCurrentInstance(...prevInstance)
+      restoreCurrentInstance(prevInstance)
     }
     setActiveSub(prevSub)
   }
@@ -379,6 +383,14 @@ export function isDynamicFragment(val) {
 
 export function isSlotFragment(val) {
   return isDynamicFragment(val) && !!val.isSlot
+}
+
+export function isForFragment(val) {
+  return isFragment(val) && typeof val.onReset === 'function'
+}
+
+export function isForBlock(val) {
+  return isFragment(val) && val.itemRef !== undefined
 }
 
 export { withSlotBoundary, currentSlotBoundary, setCurrentSlotBoundary }

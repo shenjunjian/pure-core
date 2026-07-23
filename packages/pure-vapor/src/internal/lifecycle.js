@@ -4,15 +4,19 @@ import {
   ErrorTypeStrings,
   callWithAsyncErrorHandling,
 } from './errorHandling.js'
-import { currentInstance, setCurrentInstance } from './instance.js'
+import {
+  currentInstance,
+  restoreCurrentInstance,
+  setCurrentInstance,
+} from './instance.js'
 import { LifecycleHooks } from './enums.js'
 import { warn } from './warning.js'
 
 export function injectHook(type, hook, target = currentInstance) {
   if (target) {
-    // 实例上添加钩子属性  eg. instance.bm = []
+    // ?????????  eg. instance.bm = []
     const hooks = target[type] || (target[type] = [])
-    // 包装用户的函数， 在hook._weh 挂一个真实的函数。  如果同一个hook函数用户绑定多个生命周期钩子，_weh 只生成一份。
+    // ???????? ?hook._weh ?????????  ?????hook???????????????_weh ??????
     const wrappedHook =
       hook.__weh ||
       (hook.__weh = (...args) => {
@@ -21,11 +25,11 @@ export function injectHook(type, hook, target = currentInstance) {
         try {
           return callWithAsyncErrorHandling(hook, target, type, args)
         } finally {
-          setCurrentInstance(...prev)
+          restoreCurrentInstance(prev)
           setActiveSub(prevSub)
         }
       })
-    // 把 __weh 保存到相应的周期属性下面。  TODO: 我有另一个想法： 在此处不包装，在调用处， 再包装这段逻辑。 但是调用处不统一的话，可能就会重复了。
+    // ? __weh ?????????????  TODO: ???????? ???????????? ???????? ???????????????????
     hooks.push(wrappedHook)
     return wrappedHook
   } else if (__DEV__) {
@@ -41,10 +45,10 @@ export function injectHook(type, hook, target = currentInstance) {
 const createHook =
   lifecycle =>
   /**
-   * 创建生命周期钩子
-   * @param {Function} hook 用户的函数
-   * @param {Object} target 组件实例
-   * @returns {Function} 生命周期钩子函数
+   * ????????
+   * @param {Function} hook ?????
+   * @param {Object} target ????
+   * @returns {Function} ????????
    */
   (hook, target = currentInstance) => {
     injectHook(lifecycle, (...args) => hook(...args), target)

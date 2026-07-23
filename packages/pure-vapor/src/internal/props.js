@@ -15,7 +15,7 @@ import {
   makeMap,
   toRawType,
 } from '@vue/shared'
-import { setCurrentInstance } from './instance.js'
+import { restoreCurrentInstance, setCurrentInstance } from './instance.js'
 import { warn } from './warning.js'
 
 const BooleanFlags = {
@@ -281,6 +281,6 @@ export function baseResolveDefault(factory, instance, key) {
   const prev = setCurrentInstance(instance)
   const props = toRaw(instance.props)
   value = factory.call(null, props)
-  setCurrentInstance(...prev)
+  restoreCurrentInstance(prev)
   return value
 }

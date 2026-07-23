@@ -25,7 +25,10 @@ import {
   isApplyingFallthroughProps,
 } from '../../src/vapor/component.js'
 import { xlinkNS } from '../../src/internal/domAttr.js'
-import { setCurrentInstance } from '../../src/internal/instance.js'
+import {
+  setCurrentInstance,
+  restoreCurrentInstance,
+} from '../../src/internal/instance.js'
 import {
   createDynamicComponent,
   defineVaporComponent,
@@ -41,7 +44,7 @@ let removeComponentInstance = NOOP
 beforeEach(() => {
   const instance = new VaporComponentInstance({}, {}, null)
   const prev = setCurrentInstance(instance)
-  removeComponentInstance = () => setCurrentInstance(...prev)
+  removeComponentInstance = () => restoreCurrentInstance(prev)
 })
 afterEach(() => {
   removeComponentInstance()

@@ -8,10 +8,8 @@ import {
   setBlockKey,
   template,
 } from '../../src/index.js'
-import {
-  resolveTransitionBlock,
-  resolveTransitionBlocks,
-} from '../../src/vapor/components/Transition.js'
+import { resolveTransitionBlock } from '../../src/vapor/components/Transition.js'
+import { resolveTransitionBlocks } from '../../src/vapor/components/TransitionGroup.js'
 import { ref } from '@vue/reactivity'
 import { compile, makeRender } from '../_utils.js'
 
@@ -312,6 +310,65 @@ describe('Transition', () => {
     await nextTick()
 
     expect(calls).toEqual([false, true])
+  })
+
+  test('v-if should own enter and leave when its root also has v-show', async () => {
+    const onEnter = vi.fn((_, done) => done())
+    const onLeave = vi.fn((_, done) => done())
+    const data = ref({
+      show: true,
+      onEnter,
+      onLeave,
+    })
+    const App = compile(
+      `<template>
+        <Transition
+          :css="false"
+          @enter="data.onEnter"
+          @leave="data.onLeave"
+        >
+          <div v-if="data.show" v-show="true">foo</div>
+        </Transition>
+      </template>`,
+      data,
+    )
+    const { host } = define(App).render()
+
+    data.value.show = false
+    await nextTick()
+
+    expect(onLeave).toHaveBeenCalledTimes(1)
+    expect(host.querySelector('div')).toBeNull()
+
+    data.value.show = true
+    await nextTick()
+
+    expect(onEnter).toHaveBeenCalledTimes(1)
+    expect(host.querySelector('div').textContent).toBe('foo')
+  })
+
+  test('appear should not persist a v-show root owned by v-if', async () => {
+    const onLeave = vi.fn((_, done) => done())
+    const data = ref({
+      show: true,
+      onLeave,
+    })
+    const App = compile(
+      `<template>
+        <Transition appear :css="false" @leave="data.onLeave">
+          <div v-if="data.show" v-show="true">foo</div>
+        </Transition>
+      </template>`,
+      data,
+    )
+    const { host } = define(App).render()
+
+    await nextTick()
+    data.value.show = false
+    await nextTick()
+
+    expect(onLeave).toHaveBeenCalledTimes(1)
+    expect(host.querySelector('div')).toBeNull()
   })
 
   test('direct slot child with initial hidden v-show should not trigger appear hooks', async () => {
@@ -799,5 +856,44 @@ describe('Transition', () => {
     data.value.show = false
     await nextTick()
     expect(el.className).toBe('b-leave-from b-leave-active')
+  })
+
+  test('does not carry persisted into a structural v-if root', async () => {
+    const onLeave = vi.fn((_, done) => done())
+    const data = ref({
+      branch: true,
+      show: true,
+      visible: true,
+      onLeave,
+    })
+    const Child = compile(`<template><slot /></template>`, data)
+    const App = compile(
+      `<template>
+        <Transition appear :css="false" @leave="data.onLeave">
+          <template #default v-if="data.branch">
+            <components.Child>
+              <div v-show="data.show">foo</div>
+            </components.Child>
+          </template>
+          <template #default v-else>
+            <div v-if="data.visible" v-show="true">bar</div>
+          </template>
+        </Transition>
+      </template>`,
+      data,
+      { Child },
+    )
+    const { host } = define(App).render()
+    await nextTick()
+
+    data.value.branch = false
+    await nextTick()
+    expect(host.querySelector('div').textContent).toBe('bar')
+    onLeave.mockClear()
+
+    data.value.visible = false
+    await nextTick()
+    expect(onLeave).toHaveBeenCalledOnce()
+    expect(host.querySelector('div')).toBeNull()
   })
 })

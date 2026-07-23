@@ -31,7 +31,12 @@ import {
   resolveComponent,
   NULL_DYNAMIC_COMPONENT,
 } from '../internal/resolveAssets.js'
-import { currentInstance, setCurrentInstance } from '../internal/instance.js'
+import {
+  currentInstance,
+  restoreCurrentInstance,
+  setCurrentInstance,
+} from '../internal/instance.js'
+import { isTransitionEnabled, isVaporTransition } from './transition.js'
 import { setCurrentRenderingInstance } from '../internal/componentRenderContext.js'
 import {
   pushWarningContext,
@@ -226,7 +231,14 @@ export function setupComponent(instance, component) {
   }
 
   setActiveSub(prevSub)
-  setCurrentInstance(...prevInstance)
+  restoreCurrentInstance(prevInstance)
+}
+
+export function shouldUseFunctionalFallthrough(component) {
+  return (
+    isFunction(component) &&
+    !(isTransitionEnabled && isVaporTransition(component))
+  )
 }
 
 export function applyFallthroughProps(el, attrs) {
@@ -647,38 +659,39 @@ function handleSetupResult(setupResult, component, instance) {
     pushWarningContext(instance)
   }
 
-  // 1. 开发，且setupResult不是block。
-  if (__DEV__ && !isBlock(setupResult)) {
-    // 函数组件或 没有render函数，则报错。 设置block=[]
+  if (!isBlock(setupResult)) {
     if (isFunction(component)) {
-      warn(`Functional vapor component must return a block directly.`)
+      if (__DEV__) {
+        warn(`Functional vapor component must return a block directly.`)
+      }
       instance.block = []
     } else if (!component.render) {
-      warn(
-        `Vapor component setup() returned non-block value, and has no render function.`,
-      )
+      if (__DEV__) {
+        warn(
+          `Vapor component setup() returned non-block value, and has no render function.`,
+        )
+      }
+      // setup either threw or returned a non-block value: fall back to an
+      // empty block so mount / unmount can proceed and the error can
+      // propagate to parent error boundaries
       instance.block = []
     } else {
-      // 非函，且有render函数了， setupResult 可能是对象，也可能是函数。
-      // 1. 设置到 instance.devtoolsRawSetupState 上， 用于 devtools 展示。
-      // 2. 设置到 instance.setupState 上， 用于 render 函数中使用。
-      // 3. 如果是开发模式，则创建一个代理，用于在 render 函数中访问 setupState 时，进行警告。
-      // 4. 调用 devRender 函数， 用于在开发模式下，渲染组件。
-      instance.devtoolsRawSetupState = setupResult
-      instance.setupState = proxyRefs(setupResult)
-      if (__DEV__) {
-        instance.setupState = createDevSetupStateProxy(instance)
+      if (__DEV__ || __FEATURE_PROD_DEVTOOLS__) {
+        instance.devtoolsRawSetupState = setupResult
       }
-      devRender(instance)
+      if (__DEV__) {
+        instance.setupState = proxyRefs(setupResult)
+        instance.setupState = createDevSetupStateProxy(instance)
+        devRender(instance)
+      } else {
+        // component has a render function but no setup function
+        // (typically components with only a template and no state)
+        instance.block =
+          callRender(component.render, instance, setupResult) || []
+      }
     }
   } else {
-    // 2. 生产模式，生产环境 setup 不会返回 bindings 对象，编译开关： inlineTemplate: true
-    // 它把setup + render 合并成 setup(){  return [n0,n1]}
-    if (setupResult === EMPTY_OBJ && component.render) {
-      instance.block = callRender(component.render, instance, setupResult)
-    } else {
-      instance.block = setupResult
-    }
+    instance.block = setupResult
   }
 
   // 如果有额外的属性，则需要应用到根元素上。
@@ -697,7 +710,7 @@ function handleSetupResult(setupResult, component, instance) {
     )
     if (root) {
       renderEffect(() => {
-        const attrs = isFunction(component)
+        const attrs = shouldUseFunctionalFallthrough(component)
           ? getFunctionalFallthrough(instance.attrs)
           : instance.attrs
         if (attrs) applyFallthroughProps(root, attrs)

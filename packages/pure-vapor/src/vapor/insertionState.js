@@ -11,7 +11,11 @@ export let insertionIndex
  * _setInsertionState(n3, null, 1)
  * const n2 = _createAssetComponent("Comp")
  */
-export function setInsertionState(parent, anchor, logicalIndex) {
+export function setInsertionState(
+  parent,
+  anchor,
+  logicalIndex = anchor === 0 ? 0 : undefined,
+) {
   insertionParent = parent
   insertionIndex = logicalIndex
   if (anchor !== undefined) {

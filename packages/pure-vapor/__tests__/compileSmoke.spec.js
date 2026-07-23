@@ -90,4 +90,33 @@ describe('compiler-vapor → pure-vapor', () => {
     await flushAll()
     expect(root.textContent).toBe('345')
   })
+
+  test('event handlers default to direct on() binding, not delegation', () => {
+    const { code } = compile(`<button @click="onClick">ok</button>`, {
+      mode: 'module',
+      prefixIdentifiers: true,
+      runtimeModuleName: 'pure-vapor',
+      bindingMetadata: {
+        onClick: BindingTypes.SETUP_CONST,
+      },
+    })
+    expect(code).toContain('_on(')
+    expect(code).not.toContain('_delegate(')
+    expect(code).not.toContain('_delegateEvents(')
+  })
+
+  test('event .delegate modifier opts into delegation', () => {
+    const { code } = compile(`<button @click.delegate="onClick">ok</button>`, {
+      mode: 'module',
+      prefixIdentifiers: true,
+      runtimeModuleName: 'pure-vapor',
+      bindingMetadata: {
+        onClick: BindingTypes.SETUP_CONST,
+      },
+    })
+    expect(code).toContain('_delegateEvents(')
+    expect(code).toContain('_createInvoker(')
+    expect(code).toContain('$evtclick')
+    expect(code).not.toContain('_on(')
+  })
 })

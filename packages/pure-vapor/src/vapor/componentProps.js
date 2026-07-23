@@ -21,7 +21,11 @@ import {
   validateProps,
 } from '../internal/props.js'
 import { isEmitListener } from '../internal/emit.js'
-import { currentInstance, setCurrentInstance } from '../internal/instance.js'
+import {
+  currentInstance,
+  restoreCurrentInstance,
+  setCurrentInstance,
+} from '../internal/instance.js'
 import {
   pushWarningContext,
   popWarningContext,
@@ -41,17 +45,24 @@ export function resolveFunctionSource(source) {
 
   const parent = currentInstance && currentInstance.parent
   if (parent) {
-    source._cache = computed(oldValue => {
-      const prev = setCurrentInstance(parent)
-      try {
-        return stabilizeDynamicSourceValue(oldValue, source())
-      } finally {
-        setCurrentInstance(...prev)
-      }
-    })
-    onScopeDispose(() => {
-      source._cache = undefined
-    })
+    // create the computed in the parent's context so it is collected by the
+    // parent's scope rather than whatever scope happens to be active here
+    const prev = setCurrentInstance(parent)
+    try {
+      source._cache = computed(oldValue => {
+        const prevInner = setCurrentInstance(parent)
+        try {
+          return stabilizeDynamicSourceValue(oldValue, source())
+        } finally {
+          restoreCurrentInstance(prevInner)
+        }
+      })
+      onScopeDispose(() => {
+        source._cache = undefined
+      })
+    } finally {
+      restoreCurrentInstance(prev)
+    }
     return source._cache.value
   }
 
@@ -378,9 +389,9 @@ export function getKeysFromRawProps(rawProps) {
   return Array.from(new Set(keys))
 }
 
-/** 组件定义对象的 props 属性， 返回二元组 [normalized, needCastKeys]
- * normalized: {type:String, shouldCast:bool(是否转数字), shouldCastTrue:bool(是否转布尔)}
- * needCastKeys: 需要cast的数组。 比如 number, boolean的props名称会在这里。 ['count', 'isShow']
+/** ??????? props ??? ????? [normalized, needCastKeys]
+ * normalized: {type:String, shouldCast:bool(?????), shouldCastTrue:bool(?????)}
+ * needCastKeys: ??cast???? ?? number, boolean?props??????? ['count', 'isShow']
  */
 export function normalizePropsOptions(comp) {
   const cached = comp.__propsOptions
@@ -399,15 +410,15 @@ export function normalizePropsOptions(comp) {
 function resolveDefault(factory, instance) {
   const prev = setCurrentInstance(instance)
   const res = factory.call(null, instance.props)
-  setCurrentInstance(...prev)
+  restoreCurrentInstance(prev)
   return res
 }
-/**  是否存在未声明为 prop 的属性, 需要我传递给子组件的attrs
- *  1. rawProps.$ 存在
- *  2. 组件未声明 props
- *  3.rawProps 里至少有一个 key 不是已声明的 prop
+/**  ???????? prop ???, ??????????attrs
+ *  1. rawProps.$ ??
+ *  2. ????? props
+ *  3.rawProps ?????? key ?????? prop
  *
- * @eg < Child  data-id="1" /> data-id不是props时，它就为instance.hasFallthrough=true.
+ * @eg < Child  data-id="1" /> data-id??props?????instance.hasFallthrough=true.
  */
 export function hasFallthroughAttrs(comp, rawProps) {
   if (rawProps) {
@@ -426,12 +437,12 @@ export function hasFallthroughAttrs(comp, rawProps) {
 }
 
 /**
- * 开发模式下为组件注册 props 校验副作用。
- * pure-vapor 的 instance.props 是按需从 rawProps（含 $ 动态源）解析的 Proxy，
- * 父级更新或动态 props 变化时类型/必填/custom validator 可能随之变化，
- * 因此在 renderEffect 中反复读取 instance.props 并调用 validateProps，
- * 与 runtime-core 在 initProps 时的一次性校验不同。
- * 第二个参数 noLifecycle=true，避免校验重跑触发组件生命周期。
+ * ?????????? props ??????
+ * pure-vapor ? instance.props ???? rawProps?? $ ??????? Proxy?
+ * ??????? props ?????/??/custom validator ???????
+ * ??? renderEffect ????? instance.props ??? validateProps?
+ * ? runtime-core ? initProps ??????????
+ * ????? noLifecycle=true????????????????
  */
 export function setupPropsValidation(instance) {
   const rawProps = instance.rawProps

@@ -1,5 +1,3 @@
-import { getComponentName } from '../internal/component.js'
-
 export let applyTransitionHooks
 export let deferBranchUpdateDuringLeave
 export let removeBranchWithLeave
@@ -20,5 +18,5 @@ export function registerTransitionHooks(
 export const displayName = 'VaporTransition'
 
 export function isVaporTransition(component) {
-  return getComponentName(component) === displayName
+  return component.displayName === displayName
 }

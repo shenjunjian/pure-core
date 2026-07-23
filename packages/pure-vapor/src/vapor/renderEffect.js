@@ -9,7 +9,11 @@ import {
 } from '../internal/index.js'
 import { isVaporComponent } from './component.js'
 import { inOnceSlot } from './componentSlots.js'
-import { currentInstance, setCurrentInstance } from '../internal/instance.js'
+import {
+  currentInstance,
+  restoreCurrentInstance,
+  setCurrentInstance,
+} from '../internal/instance.js'
 import { warn } from '../internal/warning.js'
 
 export class RenderEffect extends ReactiveEffect {
@@ -82,7 +86,7 @@ export class RenderEffect extends ReactiveEffect {
         this.render()
       }
     } finally {
-      setCurrentInstance(...prev)
+      restoreCurrentInstance(prev)
       if (__DEV__ && instance) {
         endMeasure(instance, 'renderEffect')
       }

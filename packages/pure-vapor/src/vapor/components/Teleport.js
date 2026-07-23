@@ -7,7 +7,10 @@ import {
   resolveTeleportTarget,
 } from '../../internal/teleportUtils.js'
 import { queuePostFlushCb } from '../../internal/scheduler.js'
-import { setCurrentInstance } from '../../internal/instance.js'
+import {
+  restoreCurrentInstance,
+  setCurrentInstance,
+} from '../../internal/instance.js'
 import { warn } from '../../internal/warning.js'
 import { insert, move, remove } from '../block.js'
 import {
@@ -98,7 +101,7 @@ export class TeleportFragment extends VaporFragment {
       )
       this.bindChildren(this.nodes)
     } finally {
-      setCurrentInstance(...prevInstance)
+      restoreCurrentInstance(prevInstance)
     }
   }
 

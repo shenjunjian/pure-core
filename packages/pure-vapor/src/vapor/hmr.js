@@ -1,5 +1,8 @@
 import { isArray } from '@vue/shared'
-import { setCurrentInstance } from '../internal/instance.js'
+import {
+  restoreCurrentInstance,
+  setCurrentInstance,
+} from '../internal/instance.js'
 import { popWarningContext, pushWarningContext } from '../internal/warning.js'
 import { insert, normalizeBlock, remove } from './block.js'
 import {
@@ -23,7 +26,7 @@ export function hmrRerender(instance) {
   pushWarningContext(instance)
   devRender(instance)
   popWarningContext()
-  setCurrentInstance(...prev)
+  restoreCurrentInstance(prev)
   insert(instance.block, parent, anchor)
 }
 
@@ -46,7 +49,7 @@ export function hmrReload(instance, newComp) {
     undefined,
     instance.appContext,
   )
-  setCurrentInstance(...prev)
+  restoreCurrentInstance(prev)
   mountComponent(newInstance, parent, anchor)
 
   updateParentBlockOnHmrReload(parentInstance, instance, newInstance)

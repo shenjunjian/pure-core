@@ -14,7 +14,7 @@ import {
   watch,
 } from '../src/index.js'
 import { resolveDynamicProps } from '../src/vapor/componentProps.js'
-import { setElementText } from '../src/vapor/dom/prop.js'
+import { setElementText, setProp } from '../src/vapor/dom/prop.js'
 import { makeRender } from './_utils.js'
 
 const define = makeRender()
@@ -826,5 +826,28 @@ describe('component: props', () => {
         title: 'baz',
       })
     })
+  })
+
+  test('should preserve root bindings excluded from functional fallthrough', async () => {
+    const title = ref('one')
+    const { component: Child } = define(props => {
+      const n0 = template('<div></div>', 1)()
+      renderEffect(() => setProp(n0, 'title', `child:${props.title}`))
+      return n0
+    })
+
+    const { host } = define({
+      setup() {
+        return createComponent(Child, {
+          title: () => title.value,
+        })
+      },
+    }).render()
+
+    expect(host.innerHTML).toBe('<div title="child:one"></div>')
+
+    title.value = 'two'
+    await nextTick()
+    expect(host.innerHTML).toBe('<div title="child:two"></div>')
   })
 })

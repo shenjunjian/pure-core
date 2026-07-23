@@ -22,8 +22,12 @@ import {
   xlinkNS,
 } from '../../internal/domAttr.js'
 import { currentInstance } from '../../internal/instance.js'
-import { isVaporComponent } from '../component.js'
-import { isApplyingFallthroughProps } from '../component.js'
+import { isFunctionalFallthroughKey } from '../../internal/functionalFallthrough.js'
+import {
+  isApplyingFallthroughProps,
+  isVaporComponent,
+  shouldUseFunctionalFallthrough,
+} from '../component.js'
 import { warn } from '../../internal/warning.js'
 import {
   domSetAttr,
@@ -43,7 +47,9 @@ const shouldSkipFallthroughKey = (el, key) => {
     instance &&
     instance.hasFallthrough &&
     instance.type.inheritAttrs !== false &&
-    key in instance.attrs
+    key in instance.attrs &&
+    (!shouldUseFunctionalFallthrough(instance.type) ||
+      isFunctionalFallthroughKey(key))
   )
 }
 

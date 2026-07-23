@@ -4,7 +4,11 @@ import {
 } from '../internal/asyncComponent.js'
 import { markAsyncBoundary } from '../internal/useId.js'
 import { ErrorCodes, handleError } from '../internal/errorHandling.js'
-import { currentInstance, setCurrentInstance } from '../internal/instance.js'
+import {
+  currentInstance,
+  restoreCurrentInstance,
+  setCurrentInstance,
+} from '../internal/instance.js'
 import { defineVaporComponent } from './apiDefineComponent.js'
 import { createComponent } from './component.js'
 import { renderEffect } from './renderEffect.js'
@@ -104,6 +108,6 @@ function createInnerComp(comp, parent, rawProps, rawSlots) {
       parent.appContext,
     )
   } finally {
-    setCurrentInstance(...prevInstance)
+    restoreCurrentInstance(prevInstance)
   }
 }

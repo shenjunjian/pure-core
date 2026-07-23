@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
-import { effect, ref } from '@vue/reactivity'
+import { effect, effectScope, ref } from '@vue/reactivity'
 import {
   LifecycleHooks,
   currentInstance,
   onMounted,
   queueJob,
+  restoreCurrentInstance,
   setCurrentInstance,
 } from '../src/internal/index.js'
 import { flushAll } from './_utils.js'
@@ -24,7 +25,7 @@ describe('pure-vapor internal', () => {
     try {
       onMounted(hook)
     } finally {
-      setCurrentInstance(...prev)
+      restoreCurrentInstance(prev)
     }
     expect(instance[LifecycleHooks.MOUNTED]).toHaveLength(1)
     instance[LifecycleHooks.MOUNTED][0]()
@@ -38,9 +39,18 @@ describe('pure-vapor internal', () => {
     expect(currentInstance).toBe(a)
     const prevB = setCurrentInstance(b)
     expect(currentInstance).toBe(b)
-    setCurrentInstance(...prevB)
+    restoreCurrentInstance(prevB)
     expect(currentInstance).toBe(a)
-    setCurrentInstance(...prevA)
+    restoreCurrentInstance(prevA)
+    expect(currentInstance).toBe(null)
+  })
+
+  it('restoreCurrentInstance restores undefined scope verbatim', () => {
+    const scope = effectScope()
+    const instance = { uid: 1, scope }
+    const prev = setCurrentInstance(instance)
+    expect(prev[1]).toBeUndefined()
+    restoreCurrentInstance(prev)
     expect(currentInstance).toBe(null)
   })
 

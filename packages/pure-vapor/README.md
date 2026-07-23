@@ -42,7 +42,9 @@ resolve: {
 | `nextTick` | 与 `runtime-core` 一致，在 scheduler microtask flush 之后 |
 | Transition | 导出 `VaporTransition`、`VaporTransitionGroup`（CSR；无 SSR hydration appear） |
 | Template ref | 导出 `setStaticTemplateRef`、`setTemplateRefBinding`（compiler-vapor 生成） |
+| 事件绑定 | 与 3.6.0-rc.2 一致：**默认直接 `on()`**；需委托时使用 `@click.delegate`（#15127 BREAKING） |
 | Hydration / SSR / interop | 不实现（见 [UPSTREAM-SYNC.md](./UPSTREAM-SYNC.md)） |
+| 同步基线 | `origin/minor` `v3.6.0-rc.2`（详见 UPSTREAM-SYNC） |
 
 ## 程序化渲染：`h` / `Fragment`
 

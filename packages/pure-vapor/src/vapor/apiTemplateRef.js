@@ -1,9 +1,4 @@
-import {
-  isRef,
-  onScopeDispose,
-  pauseTracking,
-  resetTracking,
-} from '@vue/reactivity'
+import { isRef, onScopeDispose } from '@vue/reactivity'
 import {
   EMPTY_OBJ,
   NO,
@@ -167,11 +162,17 @@ function setRef(instance, el, ref, oldRef, refFor, refKey, oldRefKey) {
       if (canSetRef(oldRef, oldRefKey)) oldRef.value = null
       if (oldRefKey) refs[oldRefKey] = null
     } else if (isFunction(oldRef) && isDynamicFragment(el)) {
-      callFunctionRef(oldRef, instance, null, refs)
+      callWithErrorHandling(oldRef, instance, ErrorCodes.FUNCTION_REF, [
+        null,
+        refs,
+      ])
     }
   } else if (oldRef != null && isDynamicFragment(el)) {
     if (isFunction(oldRef)) {
-      callFunctionRef(oldRef, instance, null, refs)
+      callWithErrorHandling(oldRef, instance, ErrorCodes.FUNCTION_REF, [
+        null,
+        refs,
+      ])
     } else if (refFor) {
       unsetRef(el)
     }
@@ -181,7 +182,10 @@ function setRef(instance, el, ref, oldRef, refFor, refKey, oldRefKey) {
 
   if (isFunction(ref)) {
     const invokeRefSetter = value => {
-      callFunctionRef(ref, instance, value, refs)
+      callWithErrorHandling(ref, instance, ErrorCodes.FUNCTION_REF, [
+        value,
+        refs,
+      ])
     }
 
     invokeRefSetter(refValue)
@@ -264,15 +268,6 @@ function setRef(instance, el, ref, oldRef, refFor, refKey, oldRefKey) {
     }
   }
   return ref
-}
-
-function callFunctionRef(ref, instance, value, refs) {
-  pauseTracking()
-  try {
-    callWithErrorHandling(ref, instance, ErrorCodes.FUNCTION_REF, [value, refs])
-  } finally {
-    resetTracking()
-  }
 }
 
 function getRefValue(el) {

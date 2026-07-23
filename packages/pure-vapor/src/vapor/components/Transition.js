@@ -12,7 +12,11 @@ import {
 } from '../../internal/transitionDom.js'
 import { onBeforeMount } from '../../internal/lifecycle.js'
 import { queuePostFlushCb } from '../../internal/scheduler.js'
-import { currentInstance, setCurrentInstance } from '../../internal/instance.js'
+import {
+  currentInstance,
+  restoreCurrentInstance,
+  setCurrentInstance,
+} from '../../internal/instance.js'
 import { isAsyncWrapper } from '../../internal/asyncComponent.js'
 import { warn } from '../../internal/warning.js'
 import { vShowOriginalDisplay } from '../../internal/vShow.js'
@@ -26,8 +30,8 @@ import {
 } from '../transition.js'
 import {
   DynamicFragment,
-  ForBlock,
-  ForFragment,
+  isDynamicFragment,
+  isForFragment,
   isFragment,
   isSlotFragment,
 } from '../fragment.js'
@@ -96,10 +100,16 @@ export const VaporTransition =
           shouldCaptureVShow && !isMounted,
           () => frag.update(slots.default),
         )
+        let hasStructuralRoot = false
+        const root = resolveTransitionBlock(frag.nodes, fragment => {
+          hasStructuralRoot =
+            hasStructuralRoot || isStructuralTransitionFragment(fragment)
+        })
         applyPendingVShows(
           frag.$transition,
-          resolveTransitionBlock(frag.nodes),
+          root,
           pendingVShows,
+          hasStructuralRoot,
         )
         isMounted = true
       })
@@ -118,30 +128,30 @@ export const VaporTransition =
     }
     let isMounted = false
     renderEffect(() => {
-      const { hooks, root } = applyResolvedTransitionHooks(
+      const { hooks, root, hasStructuralRoot } = applyResolvedTransitionHooks(
         children,
         appliedHooks,
       )
       appliedHooks = hooks
       if (!isMounted) {
         isMounted = true
-        applyPendingVShows(hooks, root, pendingVShows)
+        applyPendingVShows(hooks, root, pendingVShows, hasStructuralRoot)
       }
     })
     return children
   })
 
 const transitionTypeMap = new WeakMap()
-const inheritedTransitionKeyMap = new WeakMap()
-
-let transitionKeyGeneration = 0
-let currentTransitionKeyGeneration = 0
 
 function getTransitionType(block) {
   const type = transitionTypeMap.get(block)
   if (type !== undefined) return type
   if (block instanceof Element) return block.localName
   return block
+}
+
+export function setTransitionType(block, type) {
+  transitionTypeMap.set(block, type)
 }
 
 function getLeavingNodesForType(state, block) {
@@ -219,7 +229,7 @@ export function resolveTransitionHooks(
   return hooks
 }
 
-function applyTransitionHooksImpl(block, hooks) {
+export function applyTransitionHooksImpl(block, hooks) {
   return applyResolvedTransitionHooks(block, hooks).hooks
 }
 
@@ -229,28 +239,33 @@ function applyResolvedTransitionHooks(block, hooks) {
     if (block.length === 1) {
       block = block[0]
     } else if (block.length === 0) {
-      return { hooks }
+      return { hooks, hasStructuralRoot: false }
     }
   }
 
   if (
     hooks.applyGroup &&
-    (block instanceof ForFragment ||
+    (isForFragment(block) ||
       isSlotFragment(block) ||
       (isVaporComponent(block) && isSlotFragment(block.block)))
   ) {
     hooks.applyGroup(block, hooks.props, hooks.state, hooks.instance)
-    return { hooks }
+    return { hooks, hasStructuralRoot: false }
   }
 
   const fragments = []
-  const child = resolveTransitionBlock(block, frag => fragments.push(frag))
+  let hasStructuralRoot = false
+  const child = resolveTransitionBlock(block, fragment => {
+    fragments.push(fragment)
+    hasStructuralRoot =
+      hasStructuralRoot || isStructuralTransitionFragment(fragment)
+  })
   if (!child) {
     fragments.forEach(f => (f.$transition = hooks))
     if (__DEV__ && fragments.length === 0) {
       warn('Transition component has no valid child element')
     }
-    return { hooks }
+    return { hooks, hasStructuralRoot }
   }
 
   const { props, instance, state, delayedLeave } = hooks
@@ -262,7 +277,8 @@ function applyResolvedTransitionHooks(block, hooks) {
     h => (resolvedHooks = h),
   )
   resolvedHooks.persisted =
-    resolvedHooks.persisted || (hooks.persisted && hasVShowMarker(child))
+    resolvedHooks.persisted ||
+    (!hasStructuralRoot && hooks.persisted && hasVShowMarker(child))
   resolvedHooks.delayedLeave = delayedLeave
   child.$transition = resolvedHooks
   fragments.forEach(f => (f.$transition = resolvedHooks))
@@ -270,7 +286,16 @@ function applyResolvedTransitionHooks(block, hooks) {
   return {
     hooks: resolvedHooks,
     root: child,
+    hasStructuralRoot,
   }
+}
+
+function isStructuralTransitionFragment(fragment) {
+  return !!(
+    isDynamicFragment(fragment) &&
+    !isSlotFragment(fragment) &&
+    fragment.inTransition
+  )
 }
 
 function applyTransitionLeaveHooksImpl(block, enterHooks, afterLeaveCb) {
@@ -371,7 +396,7 @@ function removeBranchWithLeaveImpl(
           frag.renderBranch(render, transition, parent, key, noScope, true)
         }
       } finally {
-        setCurrentInstance(...prevInstance)
+        restoreCurrentInstance(prevInstance)
       }
     })
     if (mode === 'out-in') {
@@ -384,74 +409,32 @@ function removeBranchWithLeaveImpl(
 }
 
 export function resolveTransitionBlock(block, onFragment) {
-  return resolveTransitionChildren(block, { mode: 'single', onFragment })[0]
-}
-
-export function resolveTransitionBlocks(block, onFragment, onUpdateOwner) {
-  return resolveTransitionChildren(block, {
-    mode: 'group',
-    onFragment,
-    onUpdateOwner,
-  })
-}
-
-function resolveTransitionChildren(block, options) {
   const children = []
-  const prevGeneration = currentTransitionKeyGeneration
-  currentTransitionKeyGeneration = ++transitionKeyGeneration
-  try {
-    collectTransitionBlocks(block, options, children)
-    return children
-  } finally {
-    currentTransitionKeyGeneration = prevGeneration
-  }
+  collectTransitionBlocks(block, onFragment, children)
+  return children[0]
 }
 
-function collectTransitionBlocks(block, options, children) {
+function collectTransitionBlocks(block, onFragment, children) {
   if (block instanceof Node) {
     if (block instanceof Element) children.push(block)
   } else if (isVaporComponent(block)) {
-    collectComponentTransitionBlocks(block, options, children)
+    collectComponentTransitionBlocks(block, onFragment, children)
   } else if (isArray(block)) {
-    collectArrayTransitionBlocks(block, options, children)
+    collectArrayTransitionBlocks(block, onFragment, children)
   } else if (isFragment(block)) {
-    collectFragmentTransitionBlocks(block, options, children)
+    collectFragmentTransitionBlocks(block, onFragment, children)
   }
 }
 
-function collectComponentTransitionBlocks(block, options, children) {
-  if (options.mode === 'group') {
-    const isRootSlot = block.block && isSlotFragment(block.block)
-    if (options.onUpdateOwner && !isRootSlot) options.onUpdateOwner(block)
-
-    const start = children.length
-    collectTransitionBlocks(
-      block.block,
-      isRootSlot
-        ? options
-        : {
-            mode: options.mode,
-            onFragment: options.onFragment,
-          },
-      children,
-    )
-    if (!isRootSlot) {
-      for (let i = start; i < children.length; i++) {
-        transitionTypeMap.set(children[i], block.type)
-      }
-    }
-    inheritTransitionKey(children, start, block.$key)
-    return
-  }
-
+function collectComponentTransitionBlocks(block, onFragment, children) {
   if (isAsyncWrapper(block)) {
     if (!block.type.__asyncResolved) {
-      if (options.onFragment) options.onFragment(block.block)
+      if (onFragment) onFragment(block.block)
       return
     }
 
     const start = children.length
-    collectTransitionBlocks(block.block.nodes, options, children)
+    collectTransitionBlocks(block.block.nodes, onFragment, children)
     inheritSingleComponentKey(children[start], block)
     return
   }
@@ -459,33 +442,17 @@ function collectComponentTransitionBlocks(block, options, children) {
   if (isVaporTransition(block.type)) return
 
   const start = children.length
-  collectTransitionBlocks(block.block, options, children)
+  collectTransitionBlocks(block.block, onFragment, children)
   inheritSingleComponentKey(children[start], block)
 }
 
-function collectArrayTransitionBlocks(block, options, children) {
-  if (options.mode === 'group') {
-    for (let i = 0; i < block.length; i++) {
-      const c = block[i]
-      const start = children.length
-      collectTransitionBlocks(c, options, children)
-      if (c instanceof ForBlock) {
-        const count = children.length - start
-        for (let j = start; j < children.length; j++) {
-          children[j].$key =
-            c.key != null && count > 1 ? `${c.key}:${j - start}` : c.key
-        }
-      }
-    }
-    return
-  }
-
+function collectArrayTransitionBlocks(block, onFragment, children) {
   let hasFound = false
   for (let i = 0; i < block.length; i++) {
     const c = block[i]
     if (c instanceof Comment) continue
     const nested = []
-    collectTransitionBlocks(c, options, nested)
+    collectTransitionBlocks(c, onFragment, nested)
     if (__DEV__ && hasFound) {
       warn(
         '<transition> can only be used on a single element or component. ' +
@@ -499,18 +466,9 @@ function collectArrayTransitionBlocks(block, options, children) {
   }
 }
 
-function collectFragmentTransitionBlocks(block, options, children) {
-  if (options.mode === 'group') {
-    if (options.onFragment) options.onFragment(block)
-    if (options.onUpdateOwner) options.onUpdateOwner(block)
-    const start = children.length
-    collectTransitionBlocks(block.nodes, options, children)
-    inheritTransitionKey(children, start, block.$key)
-    return
-  }
-
-  if (options.onFragment) options.onFragment(block)
-  collectTransitionBlocks(block.nodes, options, children)
+function collectFragmentTransitionBlocks(block, onFragment, children) {
+  if (onFragment) onFragment(block)
+  collectTransitionBlocks(block.nodes, onFragment, children)
 }
 
 function inheritSingleComponentKey(child, block) {
@@ -518,33 +476,7 @@ function inheritSingleComponentKey(child, block) {
   if (child.$key == null && block.$key != null) {
     child.$key = block.$key
   }
-  transitionTypeMap.set(child, block.type)
-}
-
-function inheritTransitionKey(children, start, key) {
-  if (key == null || start === children.length) return
-  for (let i = start; i < children.length; i++) {
-    const child = children[i]
-    let record = inheritedTransitionKeyMap.get(child)
-    let baseKey
-    if (record && record.generation === currentTransitionKeyGeneration) {
-      baseKey = child.$key != null ? child.$key : i - start
-    } else {
-      if (!record || !Object.is(child.$key, record.inheritedKey)) {
-        record = {
-          generation: currentTransitionKeyGeneration,
-          rawBaseKey: child.$key != null ? child.$key : i - start,
-          inheritedKey: '',
-        }
-        inheritedTransitionKeyMap.set(child, record)
-      } else {
-        record.generation = currentTransitionKeyGeneration
-      }
-      baseKey = record.rawBaseKey
-    }
-    record.inheritedKey = String(key) + String(baseKey)
-    child.$key = record.inheritedKey
-  }
+  setTransitionType(child, block.type)
 }
 
 export function setTransitionHooks(block, hooks) {
@@ -577,17 +509,18 @@ function capturePendingVShows(enabled, render) {
   }
 }
 
-function applyPendingVShows(hooks, root, pendingVShows) {
+function applyPendingVShows(hooks, root, pendingVShows, hasStructuralRoot) {
   if (!pendingVShows) return
 
   if (root) {
     hooks.persisted =
       hooks.persisted ||
-      pendingVShows.some(
-        pending =>
-          pending.target === root ||
-          resolveTransitionBlock(pending.target) === root,
-      )
+      (!hasStructuralRoot &&
+        pendingVShows.some(
+          pending =>
+            pending.target === root ||
+            resolveTransitionBlock(pending.target) === root,
+        ))
   }
 
   onBeforeMount(() => {
