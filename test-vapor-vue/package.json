@@ -10,7 +10,7 @@
     "prepare": "vp config"
   },
   "dependencies": {
-    "vue": "npm:pure-vapor@3.6.0-rc.2"
+    "vue": "npm:pure-vapor@latest"
   },
   "devDependencies": {
     "@types/node": "^24.12.3",

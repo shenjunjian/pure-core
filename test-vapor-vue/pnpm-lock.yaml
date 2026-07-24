@@ -19,18 +19,18 @@ importers:
   .:
     dependencies:
       vue:
-        specifier: npm:pure-vapor@3.6.0-rc.2
-        version: pure-vapor@3.6.0-rc.2
+        specifier: npm:pure-vapor@latest
+        version: pure-vapor@3.6.0-rc.3
     devDependencies:
       '@types/node':
         specifier: ^24.12.3
         version: 24.13.0
       '@vitejs/plugin-vue':
         specifier: ^6.0.6
-        version: 6.0.7(@voidzero-dev/vite-plus-core@0.2.4(@types/node@24.13.0)(typescript@6.0.3)(yaml@2.9.0))(pure-vapor@3.6.0-rc.2)
+        version: 6.0.7(@voidzero-dev/vite-plus-core@0.2.4(@types/node@24.13.0)(typescript@6.0.3)(yaml@2.9.0))(pure-vapor@3.6.0-rc.3)
       '@vue/tsconfig':
         specifier: ^0.9.1
-        version: 0.9.1(pure-vapor@3.6.0-rc.2)(typescript@6.0.3)
+        version: 0.9.1(pure-vapor@3.6.0-rc.3)(typescript@6.0.3)
       typescript:
         specifier: ~6.0.2
         version: 6.0.3
@@ -953,8 +953,8 @@ packages:
     resolution: {integrity: sha512-Qb1gy5OrP5+zDf2Bvnzdl3jsTf1qXVMazbvCoKhtKqVs4/YK4ozX4gKQJJVyNe+cajNPn0KoC0MC3FUmaHWEmQ==}
     engines: {node: ^10.13.0 || ^12.13.0 || ^14.15.0 || >=15.0.0}
 
-  pure-vapor@3.6.0-rc.2:
-    resolution: {integrity: sha512-9TCZUC+pPjh5cYUQUjS3RvqrFJpHm2yofBJSNFIpmK7LcNNV6wDgKtlws69+Ns2iNn1QtjiqUMclEcOtEnvBIA==}
+  pure-vapor@3.6.0-rc.3:
+    resolution: {integrity: sha512-TWtuR8Pw6BfJZJKRfWUs3UQK6x5U4pq0H5CTBnEMUtHYmqsUuvTyIu4V3sg3PTKlq37b58uIVVveEfcVNmF+mg==}
 
   react-is@17.0.2:
     resolution: {integrity: sha512-w2GsyukL62IJnlaff/nRegPQR94C/XXamvMWmSHRJ4y7Ts/4ocGRmTHvOs8PSE6pB3dWOrD/nueuU5sduBsQ4w==}
@@ -1245,11 +1245,11 @@ snapshots:
     dependencies:
       undici-types: 7.18.2
 
-  '@vitejs/plugin-vue@6.0.7(@voidzero-dev/vite-plus-core@0.2.4(@types/node@24.13.0)(typescript@6.0.3)(yaml@2.9.0))(pure-vapor@3.6.0-rc.2)':
+  '@vitejs/plugin-vue@6.0.7(@voidzero-dev/vite-plus-core@0.2.4(@types/node@24.13.0)(typescript@6.0.3)(yaml@2.9.0))(pure-vapor@3.6.0-rc.3)':
     dependencies:
       '@rolldown/pluginutils': 1.0.1
       vite: '@voidzero-dev/vite-plus-core@0.2.4(@types/node@24.13.0)(typescript@6.0.3)(yaml@2.9.0)'
-      vue: pure-vapor@3.6.0-rc.2
+      vue: pure-vapor@3.6.0-rc.3
 
   '@vitest/browser-preview@4.1.10(@voidzero-dev/vite-plus-core@0.2.4(@types/node@24.13.0)(typescript@6.0.3)(yaml@2.9.0))(@voidzero-dev/vite-plus-test@0.1.24(@types/node@24.13.0)(@voidzero-dev/vite-plus-core@0.2.4(@types/node@24.13.0)(typescript@6.0.3)(yaml@2.9.0))(typescript@6.0.3)(yaml@2.9.0))':
     dependencies:
@@ -1326,7 +1326,7 @@ snapshots:
       '@oxc-project/runtime': 0.133.0
       '@oxc-project/types': 0.133.0
       lightningcss: 1.32.0
-      postcss: 8.5.15
+      postcss: 8.5.22
     optionalDependencies:
       '@types/node': 24.13.0
       fsevents: 2.3.3
@@ -1515,10 +1515,10 @@ snapshots:
 
   '@vue/shared@3.6.0-rc.2': {}
 
-  '@vue/tsconfig@0.9.1(pure-vapor@3.6.0-rc.2)(typescript@6.0.3)':
+  '@vue/tsconfig@0.9.1(pure-vapor@3.6.0-rc.3)(typescript@6.0.3)':
     optionalDependencies:
       typescript: 6.0.3
-      vue: pure-vapor@3.6.0-rc.2
+      vue: pure-vapor@3.6.0-rc.3
 
   alien-signals@3.2.1: {}
 
@@ -1718,7 +1718,7 @@ snapshots:
       ansi-styles: 5.2.0
       react-is: 17.0.2
 
-  pure-vapor@3.6.0-rc.2:
+  pure-vapor@3.6.0-rc.3:
     dependencies:
       '@vue/compiler-sfc': 3.6.0-rc.2
       '@vue/reactivity': 3.6.0-rc.2

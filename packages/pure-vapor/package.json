@@ -1,6 +1,6 @@
 {
   "name": "pure-vapor",
-  "version": "3.6.0-rc.1",
+  "version": "3.6.0-rc.3",
   "description": "Pure JavaScript Vapor runtime with only @vue/shared and @vue/reactivity",
   "main": "index.js",
   "type": "module",
@@ -8,6 +8,7 @@
   "files": [
     "index.js",
     "dist",
+    "official-ts",
     "compiler-sfc",
     "server-renderer",
     "jsx-runtime",
