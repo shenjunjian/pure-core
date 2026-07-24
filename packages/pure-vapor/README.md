@@ -16,7 +16,7 @@ _This package is **experimental**._
 
 阅读[Vue Vapor Release说明](https://github.com/vuejs/core/blob/minor/CHANGELOG.md)来熟悉Vapor的开发规范。下面是主要的细节：
 
-在`main.js`中创建APP时，可以使用createApp/createVaporApp都可以,每一个组件SFC中，通过 `<script setup vapor>  <script vapor> <template vapor>` 都能启用vapor编译。
+在`main.js`中创建APP时，可以使用createApp/createVaporApp都可以,每一个SFC组件中，通过 `<script setup vapor>  <script vapor> <template vapor>` 都能启用Vapor编译。
 
 ```js
 import { createVaporApp } from "vue";
@@ -27,7 +27,7 @@ createVaporApp(App).mount("#app");
 
 ## 项目起因
 
-Vue的Vapor模式从提出到目前，持续了2年多的时间，这实在是有点拖沓了。 我非Vue官方成员，这其中原因只能猜测一下了： 尤大避免Vue生态的碎片化，需要完全兼容VNode 模式。另外可能是开发人员变动与投入不足引起的，毕竟这2年是 AI 为王，技术退后的时代。
+Vue的Vapor模式从提出到目前，持续了2年多的时间，这实在是有点拖沓了。 我非Vue官方成员，这其中原因只能猜测一下了： 1. 尤大避免Vue生态的碎片化，需要完全兼容VNode 模式。2. 可能是开发人员变动与投入不足引起的，毕竟这2年是 AI 为王，技术退后的时代。
 
 Vue 官方需要支持`VNode模式 + 混合模式 + Vapor模式`的一种理想产物，这其中必要造成逻辑的复杂与 TS 声明的复杂。 我站在一个Vue爱好者的/学习者的角度，我不希望有这种复杂性的，复杂会阻碍我们窥探Vapor运行原理，所以我才重写当前项目。
 
@@ -79,8 +79,6 @@ const Comp = defineVaporComponent({
 | `h(VaporComp, props, slots)` | Vapor 组件（需 `__vapor`）            |
 | `h(Fragment, null, [a, b])`  | 多根 Block                            |
 | `h(tagRef, …)`               | 动态 type（`createDynamicComponent`） |
-
-**不是** VDOM 的 `h`：不能用于依赖 `createVNode` / patch 的库（如官方 vue-router 的 `RouterView`）。具名插槽需显式传 `null` props：`h(Comp, null, { header: () => … })`。
 
 ## 多 App 隔离
 
