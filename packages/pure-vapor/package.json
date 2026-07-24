@@ -1,7 +1,7 @@
 {
   "name": "pure-vapor",
   "version": "3.6.0-rc.3",
-  "description": "Pure JavaScript Vapor runtime with only @vue/shared and @vue/reactivity",
+  "description": "Pure Vapor 就是Vue 3.6 的移除掉Vnode逻辑与SSR逻辑后的版本。它仅重写了 runtime-vapor , 所以能复用完整的Vue生态工具，与正常Vue-vapor使用保持一致。",
   "main": "index.js",
   "type": "module",
   "module": "dist/pure-vapor.esm-bundler.js",
