@@ -1,6 +1,6 @@
 {
   "name": "pure-vapor",
-  "version": "3.6.0-rc.2",
+  "version": "3.6.0-rc.1",
   "description": "Pure JavaScript Vapor runtime with only @vue/shared and @vue/reactivity",
   "main": "index.js",
   "type": "module",
@@ -16,7 +16,7 @@
   "exports": {
     ".": {
       "default": "./dist/pure-vapor.esm-bundler.js",
-      "types": "./dist/vue.d.mts"
+      "types": "./official-ts/vue.d.mts"
     },
     "./server-renderer": {
       "import": {

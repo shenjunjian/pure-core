@@ -1,50 +1,58 @@
 _This package is **experimental**._
 
-# pure-vapor 纯 vapor模式
+# Pure-Vapor
 
-纯 JavaScript 的 Vapor 运行时，仅依赖 `@vue/shared` 与 `@vue/reactivity`。用于在构建时通过 `compiler-vapor` 的 `runtimeModuleName: 'pure-vapor'` 替代 `@vue/runtime-vapor` + `@vue/runtime-dom`。
+`Pure Vapor` 就是Vue 3.6 的移除掉Vnode逻辑与SSR逻辑后的版本。它仅重写了 runtime-vapor , 所以能复用完整的Vue生态工具，与正常Vue-vapor使用保持一致。
 
-## 构建产物
+## 快速上手
 
-本包仅发布 `esm-bundler` 格式（与 `@vue/runtime-vapor` 相同），面向浏览器 + 打包器环境。
+在使用 create-vue 或 create-vite 脚本架搭建一个标准的Vue工程，然后仅更改一行依赖即完成适配工作, 后续开发与官方Vapor开发一致。
 
-## 使用方式
-
-在编译选项中指定运行时模块名：
-
-```js
-// vite / vue compiler options
-compileTemplate: {
-  vapor: true,
-  vaporOptions: {
-    runtimeModuleName: 'pure-vapor',
-  },
-}
+```json
+"dependencies": {
+    "vue": "npm:pure-vapor@latest"
+  }
 ```
 
-或在 Vite 中 alias（需同时保证模板编译也指向 `pure-vapor` 的 helper import）：
+阅读[Vue Vapor Release说明](https://github.com/vuejs/core/blob/minor/CHANGELOG.md)来熟悉Vapor的开发规范。下面是主要的细节：
+
+在`main.js`中创建APP时，可以使用createApp/createVaporApp都可以,每一个组件SFC中，通过 `<script setup vapor>  <script vapor> <template vapor>` 都能启用vapor编译。
 
 ```js
-resolve: {
-  alias: {
-    vue: 'pure-vapor',
-  },
-},
+import { createVaporApp } from "vue";
+import App from "./App.vue";
+
+createVaporApp(App).mount("#app");
 ```
+
+## 项目起因
+
+Vue的Vapor模式从提出到目前，持续了2年多的时间，这实在是有点拖沓了。 我非Vue官方成员，这其中原因只能猜测一下了： 尤大避免Vue生态的碎片化，需要完全兼容VNode 模式。另外可能是开发人员变动与投入不足引起的，毕竟这2年是 AI 为王，技术退后的时代。
+
+Vue 官方需要支持`VNode模式 + 混合模式 + Vapor模式`的一种理想产物，这其中必要造成逻辑的复杂与 TS 声明的复杂。 我站在一个Vue爱好者的/学习者的角度，我不希望有这种复杂性的，复杂会阻碍我们窥探Vapor运行原理，所以我才重写当前项目。
+
+我选择使用纯 JavaScript 仅重写 Vapor 运行时，其它的包，比如： `@vue/shared` 、 `@vue/reactivity` 、 `compiler-*` 等包都是官方版本。
 
 ## 与 @vue/runtime-vapor 的差异
 
-| 项 | 说明 |
-|----|------|
-| 依赖 | 仅 `shared` + `reactivity`，无 `runtime-dom` / `runtime-core` |
-| 语言 | 纯 `.js`，无 `.d.ts` |
-| DOM 更新 | 与 `runtime-vapor` 一致，同步直接写入 DOM |
-| `nextTick` | 与 `runtime-core` 一致，在 scheduler microtask flush 之后 |
-| Transition | 导出 `VaporTransition`、`VaporTransitionGroup`（CSR；无 SSR hydration appear） |
-| Template ref | 导出 `setStaticTemplateRef`、`setTemplateRefBinding`（compiler-vapor 生成） |
-| 事件绑定 | 与 3.6.0-rc.2 一致：**默认直接 `on()`**；需委托时使用 `@click.delegate`（#15127 BREAKING） |
-| Hydration / SSR / interop | 不实现（见 [UPSTREAM-SYNC.md](./UPSTREAM-SYNC.md)） |
-| 同步基线 | `origin/minor` `v3.6.0-rc.2`（详见 UPSTREAM-SYNC） |
+| -    | 差异项                                | 说明                                                                    |
+| ---- | ------------------------------------- | ----------------------------------------------------------------------- |
+| 简化 | 纯 JavaScript 开发                    | 便于学习，加快阅读速度，在发包前，补充官方的Ts 声明文件，不影响用户使用 |
+| 简化 | 移除了Vnode , vaporInteropPlugin 支持 | 简化逻辑与体积，便于学习                                                |
+| 简化 | 移除了 SSR/Hydration 代码             | 简化逻辑， 不支持 SSR等框架， **后期计划补充令其不报错**                |
+| 简化 | 移除了 Suspense                       | 实验特性，对 runtime 影响较多，**待官方稳定后，再补充**                 |
+| 增强 | 支持h 函数                            | 返回值是 **Block**（DOM / 组件实例 / Fragment），**不是** VNode         |
+| 增强 | getCurrentInstance()                  | 返回 Vapor Instance                                                     |
+| 增强 | 多 App 隔离                           | **计划中**                                                              |
+
+由于 Pure Vapor下已经没有传统模式了，为了方便，特将少量传统模式的函数指向Vapor版本的函数，以便于使用，也不会带来歧义。 但是建议大家仍然使用Vapor的函数名，这样可以方便迁回使用官方的包。
+
+| 别名                   | 指向                        |
+| ---------------------- | --------------------------- |
+| `createApp`            | `createVaporApp`            |
+| `defineComponent`      | `defineVaporComponent`      |
+| `defineAsyncComponent` | `defineVaporAsyncComponent` |
+| `useCssVars`           | `useVaporCssVars`           |
 
 ## 程序化渲染：`h` / `Fragment`
 
@@ -55,71 +63,36 @@ resolve: {
 - 响应式与编译器产物一致：props / children 使用 **getter 或 ref** 才会随数据更新
 
 ```js
-import { h, Fragment, ref, defineVaporComponent } from 'pure-vapor'
+import { h, Fragment, ref, defineVaporComponent } from "pure-vapor";
 
-const msg = ref('hi')
+const msg = ref("hi");
 const Comp = defineVaporComponent({
   setup() {
-    return h('div', { class: () => msg.value }, () => msg.value)
+    return h("div", { class: () => msg.value }, () => msg.value);
   },
-})
+});
 ```
 
-| 用法 | 说明 |
-|------|------|
-| `h('div', props, children)` | 原生标签 → Block（Element） |
-| `h(VaporComp, props, slots)` | Vapor 组件（需 `__vapor`） |
-| `h(Fragment, null, [a, b])` | 多根 Block |
-| `h(tagRef, …)` | 动态 type（`createDynamicComponent`） |
+| 用法                         | 说明                                  |
+| ---------------------------- | ------------------------------------- |
+| `h('div', props, children)`  | 原生标签 → Block（Element）           |
+| `h(VaporComp, props, slots)` | Vapor 组件（需 `__vapor`）            |
+| `h(Fragment, null, [a, b])`  | 多根 Block                            |
+| `h(tagRef, …)`               | 动态 type（`createDynamicComponent`） |
 
 **不是** VDOM 的 `h`：不能用于依赖 `createVNode` / patch 的库（如官方 vue-router 的 `RouterView`）。具名插槽需显式传 `null` props：`h(Comp, null, { header: () => … })`。
 
-## 首版不支持
+## 多 App 隔离
 
-以下能力在完整 `vue` / `index-with-vapor` 链路中存在，但 **pure-vapor 不实现、不导出**：
+目前Vue中，有众多的变量是包级别的变量，即通过闭包来共享同一个变量，如果同一个页面上有多个Vue App实例，那么更新时可能会受污染。计划将这些闭包变量挂载到app 实例上，以避免冲突。
 
-| 类别 | 不导出示例 |
-|------|-----------|
-| 运行时编译 | `compile` |
-| VDOM | `createVNode`、`openBlock`、VDOM 版 `Fragment` / `Text` / `Comment`、…（本包 `h` / `Fragment` 为 Block 语义，见上节） |
-| VDOM App | `createSSRApp`、`hydrate`（`createApp` 为 `createVaporApp` 的别名） |
-| SSR | `createVaporSSRApp`、`useSSRContext`、… |
-| VDOM 内置 | `Teleport`、`KeepAlive`、`Suspense`、`Transition`（VDOM 版） |
-| Vapor 互操作 | `vaporInteropPlugin` 已导出为空实现（仅返回 app），无 VDOM 互操作能力 |
-| Devtools / compat | `devtools`、`compatUtils`、… |
-
-### `v-memo`（编译器静默忽略）
-
-官方 Vapor **不支持** `v-memo`（Feature Compatibility / on hold）。`compiler-vapor` 无 memo transform：指令名在 `isBuiltInDirective` 中（避免当自定义指令），模板中的 `v-memo` 被静默丢弃，运行时无 `withMemo`。
-
-VDOM 的 `v-memo` 用于依赖不变时跳过整棵 VNode 子树 patch；Vapor 由细粒度 `_renderEffect` 按实际读取的依赖更新，该主场景已被覆盖，再做依赖数组级整树 memo 意义不大。需要静态快照用 `v-once`。
-
-使用 `<Suspense>` 的模板仍可被 `compiler-vapor` 生成对应 import，但本包不导出 `Suspense`，应用层需避免。
-
-`<transition>` / `<TransitionGroup>` / `<KeepAlive>` / `<Teleport>` 已支持：编译器生成对应 Vapor 内置 import，本包已导出。
+计划待Vue 3.6 正式发布后添加。
 
 ## vue-router 限制
 
-官方 **vue-router 不能直接在 pure-vapor 上使用**。`resolve.alias: { vue: 'pure-vapor' }` 时，`<router-view>` / `<router-link>` 无法正常工作。
+官方 **vue-router 不能直接在 pure-vapor 上使用**， `<router-view> 与 <router-link>` 无法正常工作，需要等官方发布Vue-router 6.0吧！
 
-### 原因
-
-| 依赖 | pure-vapor | vue-router 的用法 | 结果 |
-|------|------------|-------------------|------|
-| `h()` | 导出 **Block 版** `h`，不返回 VNode、无 patch | `RouterView` / `RouterLink` 内部用 VDOM `h()` 创建 VNode 并渲染 | 不兼容 |
-| `setup(props, { attrs, slots })` | 支持该 API | `setup` 返回 `() => VNode` 渲染函数；scoped slot 传递 `{ Component: VNode, route }` | 语义属于 VDOM，与 Vapor block 模型不一致 |
-
-pure-vapor 中 Vapor 组件的 `setup` 通常直接返回 **block**（DOM 节点树，由 `compiler-vapor` 的 `inlineTemplate` 生成，或手写 `h()`），`slots.default()` 返回的也是 block 而非 `VNode[]`。vue-router 的 `RouterView` 则用 VDOM `h(ViewComponent, props)` 构造 VNode，并通过 slot 把 **VNode** 传给外层。本包无 VNode 运行时与 patch 流程，也没有 VDOM 互操作（`vaporInteropPlugin` 仅为空 stub）。
-
-### 仍可能可用的部分
-
-不依赖 VDOM 渲染的路由**逻辑层** API（如 `createRouter`、`router.push`、`useRouter`、`useRoute`）在 API 层面与 pure-vapor 导出的 `inject` / `computed` / `ref` 等兼容，但**不能替代** `<router-view>` / `<router-link>` 的渲染能力。
-
-### 应用层建议
-
-- 不要指望将官方 vue-router 与 `vue → pure-vapor` alias 组合后开箱即用。
-- 需要 **Vapor 原生** 的 `RouterView` / `RouterLink`（或等价实现）：slot 传递组件定义或 block，动态出口使用 `createDynamicComponent` / Block 版 `h()`，而非 VDOM `h()` + VNode。
-- 用户模板中的 `<router-view v-slot="{ Component }">` 虽可由编译器生成 Vapor 代码，但瓶颈在 **vue-router 组件本身仍是 VDOM 实现**，而非用户侧是否手写 `setup(props, { slots })`。
+> 本来是可以写一个 pure-vue-router 的包， 但预计官方在Vue 3.6正式版本出来之前会解决这个问题，所以先等待吧。
 
 ## 测试
 
